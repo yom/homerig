@@ -3,9 +3,12 @@
 # for examples
 
 # =============================================================================
-# INTERACTIVE SHELL CHECK
+# 1. CORE SHELL SETUP
 # =============================================================================
-# This section ensures the bashrc only runs for interactive shells.
+# Essential shell initialization and behavior configuration.
+# This section ensures proper shell environment and basic options.
+
+# Interactive shell check - exit early for non-interactive shells
 # Non-interactive shells (like scripts) will exit here to avoid loading
 # unnecessary configurations that could interfere with automation.
 # The $- variable contains current shell options; 'i' indicates interactive mode.
@@ -14,9 +17,18 @@ case $- in
       *) return;; # Non-interactive shell - exit immediately
 esac
 
+# Automatically update terminal size variables after each command
+# This ensures LINES and COLUMNS variables stay accurate when terminal is resized
+shopt -s checkwinsize
+
 # =============================================================================
-# PATH CONFIGURATION
+# 2. ENVIRONMENT VARIABLES
 # =============================================================================
+# Configure environment variables for development tools and system behavior.
+# This includes PATH setup and tool-specific configurations.
+
+# PATH Configuration
+# ==================
 # Configure the PATH environment variable to include various binary directories.
 # PATH determines where the shell looks for executable commands.
 
@@ -37,8 +49,25 @@ if [ -d /home/yom/.local/bin ] ; then
     export PATH="/home/yom/.local/bin:${PATH}"
 fi
 
+# Development Environment Variables
+# =================================
+
+# Set Go workspace directory for Go development
+export GOPATH=~/go
+
+# Tool Configuration Variables
+# =============================
+
+# Configure less pager to interpret ANSI color sequences
+# -R flag allows less to display colored output properly
+export LESS='-R'
+
+# Set up lessfilter for enhanced file viewing in less
+# This allows less to display syntax highlighting and formatted content
+export LESSOPEN='|~/.lessfilter %s'
+
 # =============================================================================
-# BASH HISTORY CONFIGURATION
+# 3. HISTORY MANAGEMENT
 # =============================================================================
 # Configure how bash handles command history for better usability and privacy.
 
@@ -60,24 +89,44 @@ HISTSIZE=1000
 HISTFILESIZE=2000
 
 # =============================================================================
-# SHELL OPTIONS AND UTILITIES
+# 4. TERMINAL & DISPLAY
 # =============================================================================
-# Configure various shell behaviors and integrate useful utilities.
-
-# Automatically update terminal size variables after each command
-# This ensures LINES and COLUMNS variables stay accurate when terminal is resized
-shopt -s checkwinsize
-
+# Configure terminal capabilities, color support, and display utilities.
 
 # Set up lesspipe for better handling of non-text files in less/more
 # This allows viewing compressed files, images, etc. directly with less
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
+# Enable colored output for ls command
+if [ -x /usr/bin/dircolors ]; then
+    # Load custom color scheme if available, otherwise use default
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+fi
+
+# Powerline Configuration
+# ========================
+# Set up powerline for enhanced prompt with git integration and visual styling
+
+# Start powerline daemon if not already running (use system binary)
+/usr/bin/powerline-daemon -q
+
+# Source the powerline bash bindings
+POWERLINE_BASH_CONTINUATION=1
+POWERLINE_BASH_SELECT=1
+source /usr/share/powerline/bindings/bash/powerline.sh
+
 # =============================================================================
-# GIT PROMPT CONFIGURATION
+# 5. VERSION CONTROL INTEGRATION
 # =============================================================================
-# Configure git-prompt to show detailed repository status in the shell prompt.
-# These settings control what information is displayed about the current git repo.
+# Git integration is handled automatically by powerline, which provides:
+# - Current branch display
+# - Dirty/clean status indicators
+# - Ahead/behind commit counts
+# - Stash status
+# - Untracked files indication
+#
+# Additional git-prompt settings (optional - powerline has its own git integration)
+# These may still be used by other tools or custom scripts
 
 # Show unstaged (*) and staged (+) changes in the prompt
 export GIT_PS1_SHOWDIRTYSTATE=1
@@ -89,78 +138,61 @@ export GIT_PS1_SHOWSTASHSTATE=1
 export GIT_PS1_SHOWUNTRACKEDFILES=1
 
 # Show relationship between HEAD and upstream branch
-# 'verbose' shows ahead/behind counts (e.g., ↑3↓1)
 export GIT_PS1_SHOWUPSTREAM=verbose
 
 # Use branch names instead of commit hashes when possible
 export GIT_PS1_DESCRIBE_STYLE=branch
 
-# Enable colored hints in the git prompt (requires proper prompt setup)
-export GIT_PS1_SHOWCOLORHINTS=1
+# =============================================================================
+# 6. PROMPT CUSTOMIZATION
+# =============================================================================
+# Powerline provides the enhanced prompt with the following features:
+# - Colorized segments showing user, hostname, current directory
+# - Git branch and status integration
+# - Return code indication for failed commands  
+# - Virtual environment display (Python, etc.)
+# - Customizable themes and segments
+#
+# Powerline configuration files are located in:
+# - System: /usr/share/powerline/config_files/
+# - User: ~/.config/powerline/ (create this for custom configs)
+#
+# To customize powerline themes and segments, copy the system configs to
+# your user directory and modify them:
+# mkdir -p ~/.config/powerline
+# cp -r /usr/share/powerline/config_files/* ~/.config/powerline/
 
-# Load the git-prompt script that provides the __git_ps1 function
-source /etc/bash_completion.d/git-prompt
+# Legacy prompt functions (kept for reference, not used with powerline)
+# function _usr_prompt () {
+#     [[ $EUID == 0 ]] \
+#     && echo -en "\[\e[0;31m\]" \
+#     || echo -en "\[\e[0;34m\]"
+# }
+#
+# function _git_prompt () {
+#     GITSTATUS=$(__git_ps1 %s)
+#     [ "x$GITSTATUS" == "x" ] \
+#     || echo -en "\[\e[1m\][\[\e[0;34m\]${GITSTATUS}\[\e[1m\]]\[\e[m\]"
+# }
 
 # =============================================================================
-# CUSTOM PROMPT FUNCTIONS
+# 7. ALIASES & SHORTCUTS
 # =============================================================================
-# These functions create colorized prompt components for a custom bash prompt.
+# Configure command aliases and shortcuts for improved productivity.
 
-# Function to set user color based on privileges
-# Returns red color for root user, blue for regular users
-function _usr_prompt () {
-    [[ $EUID == 0 ]] \
-    && echo -en "\[\e[0;31m\]" \  # Red for root (EUID=0)
-    || echo -en "\[\e[0;34m\]"    # Blue for regular users
-}
-
-# Function to display git status in the prompt
-# Shows current branch and status indicators in brackets with formatting
-function _git_prompt () {
-    GITSTATUS=$(__git_ps1 %s)     # Get git status from git-prompt
-    [ "x$GITSTATUS" == "x" ] \    # Check if we're in a git repository
-    || echo -en "\[\e[1m\][\[\e[0;34m\]${GITSTATUS}\[\e[1m\]]\[\e[m\]"  # Format: [branch*+%]
-}
-
-# =============================================================================
-# TERMINAL AND POWERLINE SETUP
-# =============================================================================
-# Configuration for advanced terminal features and powerline prompt styling.
-
-# Function to update prompt and terminal settings
-function _update_ps1() {
-    # Force terminal type to support 256 colors for better display
-    export TERM="screen-256color"
-    
-    # Enable powerline features for better prompt continuation and selection
-    POWERLINE_BASH_CONTINUATION=1  # Better multiline command prompts
-    POWERLINE_BASH_SELECT=1        # Enhanced selection highlighting
-}
-
-# Conditionally set up the prompt update function
-# Only activate if not in basic linux terminal and not already configured
-if [[ $TERM != linux && ! $PROMPT_COMMAND =~ _update_ps1 ]]; then
-    PROMPT_COMMAND="_update_ps1; $PROMPT_COMMAND"
-fi
-
-# =============================================================================
-# ALIASES AND COMPLETION SETUP
-# =============================================================================
-# Configure colored output and load shell completion features.
-
-# Enable colored output for ls command
-if [ -x /usr/bin/dircolors ]; then
-    # Load custom color scheme if available, otherwise use default
-    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
-    # Set ls to use colors automatically
-    alias ls='ls --color=auto'
-fi
+# Enable colored ls by default
+alias ls='ls --color=auto'
 
 # Load custom aliases from separate file if it exists
 # This allows keeping personal aliases organized in ~/.bash_aliases
 if [ -f ~/.bash_aliases ]; then
     . ~/.bash_aliases
 fi
+
+# =============================================================================
+# 8. COMPLETION SYSTEMS
+# =============================================================================
+# Enable advanced bash completion features for enhanced command-line experience.
 
 # Enable advanced bash completion features
 # This provides tab completion for commands, options, filenames, etc.
@@ -176,22 +208,40 @@ if ! shopt -oq posix; then
 fi
 
 # =============================================================================
-# ENVIRONMENT VARIABLES
+# 9. SECURITY & CREDENTIALS
 # =============================================================================
-# Set up various environment variables for development tools and utilities.
+# Security-related configurations and credential handling guidance.
 
-# AWS credentials should be configured using 'aws configure' or ~/.aws/credentials
-# (Previously contained hardcoded credentials - now removed for security)
+# AWS Credentials Configuration
+# =============================
+# SECURITY WARNING: Never store credentials directly in shell configuration files.
+# 
+# Recommended secure credential storage methods:
+# 1. AWS CLI configuration: Run 'aws configure' to set up credentials securely
+# 2. AWS credentials file: Store in ~/.aws/credentials with proper permissions (600)
+# 3. Environment variables: Export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+# 4. IAM roles: Use IAM roles for EC2 instances (recommended for cloud environments)
+# 5. AWS SSO: Use 'aws sso configure' for organizations using AWS SSO
+#
+# Example secure setup:
+#   aws configure
+#   # or
+#   export AWS_ACCESS_KEY_ID="your-access-key"
+#   export AWS_SECRET_ACCESS_KEY="your-secret-key"
+#   export AWS_DEFAULT_REGION="your-preferred-region"
 
-# Set Go workspace directory for Go development
-export GOPATH=~/go
+# =============================================================================
+# 10. CUSTOM FUNCTIONS & UTILITIES
+# =============================================================================
+# User-defined functions and utilities for enhanced shell functionality.
+# Add your custom functions and utilities here.
 
-# Configure less pager to interpret ANSI color sequences
-# -R flag allows less to display colored output properly
-export LESS='-R'
+# Example utility functions can be added here:
+# function myfunction() {
+#     # Your custom function code
+# }
 
-# Set up lessfilter for enhanced file viewing in less
-# This allows less to display syntax highlighting and formatted content
-export LESSOPEN='|~/.lessfilter %s'
-
-
+# Load additional custom functions from external files if they exist
+# if [ -f ~/.bash_functions ]; then
+#     . ~/.bash_functions
+# fi
