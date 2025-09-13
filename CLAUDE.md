@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a personal dotfiles repository containing shell configuration files. Currently contains:
 - `.bashrc`: Main bash configuration with PATH setup, shell options, Git prompt integration, and various shell customizations
 
-## Important Security Note
+## AWS Configuration
 
-**WARNING**: The .bashrc file contains hardcoded AWS credentials (lines 99-100). These credentials should be removed and stored securely using:
+The .bashrc file includes commented guidance for secure AWS credential configuration using:
 - AWS CLI configuration (`aws configure`)
 - Environment variables  
 - AWS credentials file (~/.aws/credentials)

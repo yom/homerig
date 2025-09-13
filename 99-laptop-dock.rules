@@ -1,0 +1,5 @@
+# Udev rule to automatically run laptop-dock.sh when HDMI cable is plugged/unplugged
+# This rule triggers on DRM hotplug events (HDMI connect/disconnect)
+
+ACTION=="change", SUBSYSTEM=="drm", KERNEL=="card0", ENV{DEVTYPE}=="drm_minor", \
+    RUN+="/home/yom/git/dotfiles/laptop-dock.sh"
