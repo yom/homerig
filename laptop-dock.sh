@@ -23,17 +23,27 @@ readonly LOCKFILE="/var/lock/laptop-dock.lock"
 readonly LOGFILE="/tmp/laptop-dock-$(whoami).log"
 readonly STATEFILE="/tmp/laptop-dock-state-$(whoami).txt"
 readonly LOCK_TIMEOUT_SEC=5
-readonly DISPLAY_ID=":0"
-readonly USER_HOME="/home/yom"
-readonly AUDIO_SERVER="127.0.0.1"
-readonly AUDIO_CARD="alsa_card.pci-0000_00_1f.3"
+readonly DISPLAY_ID="${DISPLAY_ID:-:0}"
+readonly USER_HOME="${USER_HOME:-/home/$(logname 2>/dev/null || echo ${USER:-yom})}"
+readonly AUDIO_SERVER="${AUDIO_SERVER:-127.0.0.1}"
+readonly AUDIO_CARD="${AUDIO_CARD:-alsa_card.pci-0000_00_1f.3}"
+
+# Display configuration constants
+readonly PRIMARY_DISPLAY="${PRIMARY_DISPLAY:-eDP-1}"
+readonly DISPLAY_POSITION="${DISPLAY_POSITION:-above}"  # above, right, left, below
+readonly DISPLAY_ROTATION="${DISPLAY_ROTATION:-left}"   # left, right, inverted, normal
+
+# Window rescue configuration
+readonly WINDOW_RESCUE_MARGIN="${WINDOW_RESCUE_MARGIN:-20}"      # Margin from screen edges
+readonly WINDOW_CASCADE_OFFSET="${WINDOW_CASCADE_OFFSET:-30}"    # Offset between rescued windows
+readonly WINDOW_BASE_POSITION="${WINDOW_BASE_POSITION:-50}"      # Base position for first rescued window
 
 # Logging configuration
 readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"  # DEBUG, INFO, WARN, ERROR
 readonly LOG_FORMAT="${LOG_FORMAT:-timestamp}"  # timestamp, simple
 readonly USE_JOURNALD="${USE_JOURNALD:-true}"  # Enable journald logging
 
-# Window rescue configuration
+# Window rescue area configuration
 readonly MIN_VISIBLE_RATIO="${MIN_VISIBLE_RATIO:-0.3}"  # Minimum ratio of window area that must be visible (0.0-1.0)
 readonly MAX_WINDOW_RATIO="${MAX_WINDOW_RATIO:-0.9}"    # Maximum ratio of screen area a rescued window can occupy (0.0-1.0)
 
@@ -94,19 +104,145 @@ log() {
     fi
 }
 
+# === LOGGING FUNCTIONS ===
+
 # Convenience functions
 log_debug() { log "DEBUG" "$@"; }
 log_info()  { log "INFO" "$@"; }
 log_warn()  { log "WARN" "$@"; }
 log_error() { log "ERROR" "$@"; }
 
-function cache_xrandr_output() {
-    # Call xrandr once and cache globally - handles both root and non-root contexts
-    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-        XRANDR_OUTPUT=$(su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY xrandr -q" 2>/dev/null)
-    else
-        XRANDR_OUTPUT=$(xrandr -q 2>/dev/null)
+# === ERROR HANDLING FUNCTIONS ===
+
+# Exit with error message and cleanup
+die() {
+    local exit_code=${2:-1}
+    log_error "$1"
+    cleanup_and_exit "$exit_code"
+}
+
+# Retry function with exponential backoff
+retry() {
+    local max_attempts="$1"
+    local delay="$2"
+    local description="$3"
+    shift 3
+
+    local attempt=1
+    while [[ $attempt -le $max_attempts ]]; do
+        log_debug "Attempt $attempt/$max_attempts: $description"
+
+        if "$@"; then
+            log_debug "$description succeeded on attempt $attempt"
+            return 0
+        fi
+
+        if [[ $attempt -eq $max_attempts ]]; then
+            log_error "$description failed after $max_attempts attempts"
+            return 1
+        fi
+
+        log_warn "$description failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
+        sleep "$delay"
+        delay=$((delay * 2))  # Exponential backoff
+        ((attempt++))
+    done
+}
+
+# Safe command execution with error handling
+safe_run() {
+    local description="$1"
+    shift
+
+    log_debug "Executing: $description"
+    if ! "$@"; then
+        log_error "Failed to execute: $description"
+        return 1
     fi
+    log_debug "Successfully executed: $description"
+    return 0
+}
+
+# Cleanup function called on exit
+cleanup_and_exit() {
+    local exit_code=${1:-0}
+
+    # Cleanup lock if we have it
+    if [[ -n "$LOCKFILE" && -f "$LOCKFILE" ]]; then
+        flock -u 200 2>/dev/null || true
+        rm -f "$LOCKFILE" 2>/dev/null || true
+    fi
+
+    exit "$exit_code"
+}
+
+# === USER CONTEXT & PERMISSION HELPERS ===
+is_running_as_root_for_user() {
+    [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]
+}
+
+run_as_x_user() {
+    if is_running_as_root_for_user; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(printf '%q ' "$@")" 2>/dev/null
+    else
+        "$@" 2>/dev/null
+    fi
+}
+
+# Dependency validation function
+check_dependencies() {
+    local missing=()
+    local required_commands=(
+        "xrandr:Display configuration (x11-xserver-utils)"
+        "xdpyinfo:Display information (x11-utils)"
+        "bc:Calculator for arithmetic (bc)"
+    )
+    local optional_commands=(
+        "wmctrl:Window management for rescue feature (wmctrl)"
+        "pactl:Audio switching (pulseaudio-utils)"
+        "systemd-cat:Journald logging (systemd)"
+    )
+
+    # Check required dependencies
+    for cmd_info in "${required_commands[@]}"; do
+        local cmd="${cmd_info%%:*}"
+        local desc="${cmd_info#*:}"
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd ($desc)")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        printf '%s\n' "${missing[@]}" | sed 's/^/  - /' >&2
+        die "Missing required dependencies listed above"
+    fi
+
+    # Check optional dependencies and warn
+    local optional_missing=()
+    for cmd_info in "${optional_commands[@]}"; do
+        local cmd="${cmd_info%%:*}"
+        local desc="${cmd_info#*:}"
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            optional_missing+=("$cmd ($desc)")
+        fi
+    done
+
+    if [[ ${#optional_missing[@]} -gt 0 ]]; then
+        log_warn "Optional dependencies missing (some features may be disabled):"
+        for dep in "${optional_missing[@]}"; do
+            log_warn "  - $dep"
+        done
+    fi
+
+    log_debug "Dependency check completed successfully"
+    return 0
+}
+
+# === DISPLAY MANAGEMENT FUNCTIONS ===
+
+cache_xrandr_output() {
+    # Call xrandr once and cache globally - handles both root and non-root contexts
+    XRANDR_OUTPUT=$(run_as_x_user xrandr -q)
 
     if [[ -z "$XRANDR_OUTPUT" ]]; then
         log_error "Failed to get xrandr output"
@@ -117,14 +253,14 @@ function cache_xrandr_output() {
     return 0
 }
 
-function get_display_state() {
+get_display_state() {
     # Get current connected displays state using cached xrandr output
     echo "$XRANDR_OUTPUT" | \
         grep -E ' (connected|disconnected)' | \
         awk '{print $1 ":" $2}' | sort
 }
 
-function get_external_displays_info() {
+get_external_displays_info() {
     # Get detailed info about external displays (connected, not primary)
     # Returns: display_name:status:resolution:rotation
     echo "$XRANDR_OUTPUT" | \
@@ -144,38 +280,50 @@ function get_external_displays_info() {
         done
 }
 
-function get_active_external_displays() {
+get_active_external_displays() {
     # Get list of external displays that are currently active/configured
     get_external_displays_info | grep ':active:' | cut -d: -f1
 }
 
-function get_external_display_rotation() {
+get_external_display_rotation() {
     # Get rotation state of a specific external display
     local display="$1"
     get_external_displays_info | grep "^$display:" | cut -d: -f4
 }
 
-function run_xrandr_cmd() {
-    # Execute xrandr command with proper user context
+run_xrandr_cmd() {
+    # Execute xrandr command with proper user context with retry
     local xrandr_args="$1"
     local cmd="/usr/bin/xrandr --display $DISPLAY $xrandr_args"
 
     log_debug "Running xrandr command: $cmd"
 
-    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $cmd" 2>/dev/null || {
-            log_warn "xrandr command failed: $cmd"
+    # Use retry for xrandr commands as they can be flaky during display transitions
+    local attempt=1
+    local max_attempts=3
+    local delay=1
+
+    while [[ $attempt -le $max_attempts ]]; do
+        log_debug "Attempt $attempt/$max_attempts: xrandr command: $xrandr_args"
+
+        if run_as_x_user bash -c "$cmd"; then
+            log_debug "xrandr command succeeded on attempt $attempt"
+            return 0
+        fi
+
+        if [[ $attempt -eq $max_attempts ]]; then
+            log_error "xrandr command failed after $max_attempts attempts"
             return 1
-        }
-    else
-        eval "$cmd" || {
-            log_warn "xrandr command failed: $cmd"
-            return 1
-        }
-    fi
+        fi
+
+        log_warn "xrandr command failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
+        sleep "$delay"
+        delay=$((delay * 2))
+        ((attempt++))
+    done
 }
 
-function determine_action() {
+determine_action() {
     # Determine what action to take based on current display state
     # Returns: extend|rotate|unrotate|cleanup
 
@@ -190,7 +338,7 @@ function determine_action() {
     if [[ -n "$previous_state" ]]; then
         # Look for connected external displays in previous state
         while IFS= read -r line; do
-            if [[ "$line" =~ ^[^:]+:connected$ ]] && [[ "$line" != "eDP-1:connected" ]]; then
+            if [[ "$line" =~ ^[^:]+:connected$ ]] && [[ "$line" != "$PRIMARY_DISPLAY:connected" ]]; then
                 had_external_before=true
                 break
             fi
@@ -235,7 +383,9 @@ function determine_action() {
     fi
 }
 
-function get_statefile_path() {
+# === STATE MANAGEMENT FUNCTIONS ===
+
+get_statefile_path() {
     # Get the right state file path based on context
     if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
         echo "/tmp/laptop-dock-state-${X_USER}.txt"
@@ -244,28 +394,21 @@ function get_statefile_path() {
     fi
 }
 
-function save_current_state() {
+save_current_state() {
     # Simple: always write as the X11 user
     local current_state="$1"
     local statefile=$(get_statefile_path)
 
     # Always write as the user (even when script runs as root)
-    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-        su - "$X_USER" -c "echo '$current_state' > '$statefile'" 2>/dev/null || {
-            log_error "Failed to write state file as user $X_USER: $statefile"
-            return 1
-        }
-    else
-        echo "$current_state" > "$statefile" 2>/dev/null || {
-            log_error "Failed to write state file: $statefile"
-            return 1
-        }
-    fi
+    run_as_x_user bash -c "echo '$current_state' > '$statefile'" || {
+        log_error "Failed to write state file: $statefile"
+        return 1
+    }
 
     log_debug "Saved state to $statefile"
 }
 
-function load_previous_state() {
+load_previous_state() {
     # Simple: read file contents, empty if doesn't exist
     local statefile=$(get_statefile_path)
 
@@ -276,49 +419,118 @@ function load_previous_state() {
     fi
 }
 
-function check_and_handle_state_change() {
-    # Use already cached xrandr output
-    local current_state=$(get_display_state)
-    local previous_state=$(load_previous_state)
-
-    log_debug "Current: '$current_state'"
-    log_debug "Previous: '$previous_state'"
-
-    if [[ "$current_state" != "$previous_state" ]]; then
-        log_debug "Display state changed, proceeding with configuration"
-
-        # Always save current state
-        save_current_state "$current_state"
-
-        return 0  # State changed - do something
-    else
-        log_debug "Display state unchanged, exiting early"
-        return 1  # No change - exit
-    fi
-}
-
-function run_using_same_user() {
+run_using_same_user() {
     local progname="$1"
     shift
-    local cmd="$*"
 
     log_debug "Getting user for process: $progname"
     local username=$(ps -p $(pidof -s "$progname" 2>/dev/null) -o ruser= 2>/dev/null)
-    
+
     if [[ -z "$username" ]]; then
         log_error "Could not find process: $progname"
         return 1
     fi
-    
-    log_debug "Running command as user '$username': $cmd"
+
+    log_debug "Running command as user '$username': $*"
     if [[ "$username" = "$(whoami)" ]]; then
-        eval "$cmd" 2>/dev/null
+        "$@" 2>/dev/null
     else
-        su - "$username" -c "$cmd" 2>/dev/null
+        su - "$username" -c "$(printf '%q ' "$@")" 2>/dev/null
     fi
 }
 
-function rescue_windows() {
+# === WINDOW MANAGEMENT FUNCTIONS ===
+
+# Window rescue helper functions
+calculate_visible_area() {
+    local x=$1 y=$2 width=$3 height=$4 screen_width=$5 screen_height=$6
+
+    # Calculate intersection rectangle
+    local visible_left=$((x > 0 ? x : 0))
+    local visible_top=$((y > 0 ? y : 0))
+    local visible_right=$(((x + width) < screen_width ? (x + width) : screen_width))
+    local visible_bottom=$(((y + height) < screen_height ? (y + height) : screen_height))
+
+    # Calculate visible dimensions (ensure non-negative)
+    local visible_width=$((visible_right > visible_left ? (visible_right - visible_left) : 0))
+    local visible_height=$((visible_bottom > visible_top ? (visible_bottom - visible_top) : 0))
+
+    # Return visible area
+    echo $((visible_width * visible_height))
+}
+
+is_window_orphaned() {
+    local x=$1 y=$2 width=$3 height=$4 screen_width=$5 screen_height=$6 title="$7"
+
+    local total_area=$((width * height))
+    [[ $total_area -eq 0 ]] && { log_debug "Window '$title' has zero area, considering as orphaned"; return 0; }
+
+    local visible_area=$(calculate_visible_area "$x" "$y" "$width" "$height" "$screen_width" "$screen_height")
+
+    # Use integer arithmetic: visible_area * 1000 >= total_area * (MIN_VISIBLE_RATIO * 1000)
+    local min_visible_area_scaled=$(echo "$total_area * $MIN_VISIBLE_RATIO * 1000" | bc -l | cut -d. -f1)
+    local visible_area_scaled=$((visible_area * 1000))
+
+    if [[ $visible_area_scaled -ge $min_visible_area_scaled ]]; then
+        log_debug "Window '$title' has sufficient visible area (${visible_area}/${total_area}), skipping"
+        return 1  # Not orphaned
+    fi
+
+    log_debug "Window '$title' is orphaned with visible ratio $(echo "scale=2; $visible_area / $total_area" | bc -l) (threshold: $MIN_VISIBLE_RATIO)"
+    return 0  # Is orphaned
+}
+
+calculate_new_window_size() {
+    local width=$1 height=$2 screen_width=$3 screen_height=$4
+
+    local max_width=$(echo "$screen_width * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
+    local max_height=$(echo "$screen_height * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
+
+    if [[ $width -le $max_width && $height -le $max_height ]]; then
+        echo "$width $height"  # No resizing needed
+        return 0
+    fi
+
+    # Calculate scaling factors for both dimensions
+    local scale_x_scaled=$((max_width * 1000 / width))
+    local scale_y_scaled=$((max_height * 1000 / height))
+
+    # Use the smaller scale factor to preserve aspect ratio
+    local scale_factor_scaled
+    if [[ $scale_x_scaled -lt $scale_y_scaled ]]; then
+        scale_factor_scaled=$scale_x_scaled
+    else
+        scale_factor_scaled=$scale_y_scaled
+    fi
+
+    # Apply scaling (divide by 1000 to get back to normal scale)
+    local new_width=$((width * scale_factor_scaled / 1000))
+    local new_height=$((height * scale_factor_scaled / 1000))
+
+    echo "$new_width $new_height"
+}
+
+position_rescued_window() {
+    local new_width=$1 new_height=$2 screen_width=$3 screen_height=$4 moved_count=$5
+
+    # Calculate target position with padding
+    local new_x=$((WINDOW_BASE_POSITION + (moved_count * WINDOW_CASCADE_OFFSET)))
+    local new_y=$((WINDOW_BASE_POSITION + (moved_count * WINDOW_CASCADE_OFFSET)))
+
+    # Ensure new position accounts for the window dimensions
+    if [[ $((new_x + new_width)) -gt $screen_width ]]; then
+        new_x=$((screen_width - new_width - WINDOW_RESCUE_MARGIN))
+        if [[ $new_x -lt 0 ]]; then new_x=10; fi
+    fi
+    if [[ $((new_y + new_height)) -gt $screen_height ]]; then
+        new_y=$((screen_height - new_height - WINDOW_RESCUE_MARGIN))
+        if [[ $new_y -lt 0 ]]; then new_y=10; fi
+    fi
+
+    echo "$new_x $new_y"
+}
+
+rescue_windows() {
     log_debug "Checking for orphaned windows on disconnected displays"
 
     # Get current screen dimensions using xdpyinfo (more reliable than xrandr)
@@ -337,75 +549,24 @@ function rescue_windows() {
     if command -v wmctrl >/dev/null 2>&1; then
         local moved_count=0
         while IFS=' ' read -r wid desktop x y width height hostname title; do
-            # Calculate visible area ratio to determine if window is orphaned
-            local visible_left=$((x > 0 ? x : 0))
-            local visible_top=$((y > 0 ? y : 0))
-            local visible_right=$(((x + width) < screen_width ? (x + width) : screen_width))
-            local visible_bottom=$(((y + height) < screen_height ? (y + height) : screen_height))
-
-            # Calculate visible dimensions (ensure non-negative)
-            local visible_width=$((visible_right > visible_left ? (visible_right - visible_left) : 0))
-            local visible_height=$((visible_bottom > visible_top ? (visible_bottom - visible_top) : 0))
-
-            # Calculate areas
-            local visible_area=$((visible_width * visible_height))
-            local total_area=$((width * height))
-
-            # Skip if window has sufficient visible area (avoid division by zero)
-            if [[ $total_area -gt 0 ]]; then
-                # Use integer arithmetic: visible_area * 1000 >= total_area * (MIN_VISIBLE_RATIO * 1000)
-                local min_visible_area_scaled=$(echo "$total_area * $MIN_VISIBLE_RATIO * 1000" | bc -l | cut -d. -f1)
-                local visible_area_scaled=$((visible_area * 1000))
-
-                if [[ $visible_area_scaled -ge $min_visible_area_scaled ]]; then
-                    log_debug "Window '$title' has sufficient visible area (${visible_area}/${total_area}), skipping"
-                    continue
-                fi
-
-                log_debug "Window '$title' is orphaned with visible ratio $(echo "scale=2; $visible_area / $total_area" | bc -l) (threshold: $MIN_VISIBLE_RATIO)"
-            else
-                log_debug "Window '$title' has zero area, considering as orphaned"
+            # Check if window is orphaned
+            if ! is_window_orphaned "$x" "$y" "$width" "$height" "$screen_width" "$screen_height" "$title"; then
+                continue
             fi
 
-            # Calculate target position with padding
-            local new_x=$((50 + (moved_count * 30)))
-            local new_y=$((50 + (moved_count * 30)))
+            # Calculate new window size (may be resized to fit screen)
+            local new_size=($(calculate_new_window_size "$width" "$height" "$screen_width" "$screen_height"))
+            local new_width=${new_size[0]}
+            local new_height=${new_size[1]}
 
-            # Check if window needs resizing (too large for current screen)
-            local max_width=$(echo "$screen_width * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
-            local max_height=$(echo "$screen_height * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
-            local new_width=$width
-            local new_height=$height
-
-            if [[ $width -gt $max_width || $height -gt $max_height ]]; then
-                # Calculate scaling factors for both dimensions
-                local scale_x_scaled=$((max_width * 1000 / width))  # Scale factor * 1000
-                local scale_y_scaled=$((max_height * 1000 / height))
-
-                # Use the smaller scale factor to preserve aspect ratio
-                local scale_factor_scaled
-                if [[ $scale_x_scaled -lt $scale_y_scaled ]]; then
-                    scale_factor_scaled=$scale_x_scaled
-                else
-                    scale_factor_scaled=$scale_y_scaled
-                fi
-
-                # Apply scaling (divide by 1000 to get back to normal scale)
-                new_width=$((width * scale_factor_scaled / 1000))
-                new_height=$((height * scale_factor_scaled / 1000))
-
+            if [[ $new_width -ne $width || $new_height -ne $height ]]; then
                 log_debug "Resizing oversized window '$title' from ${width}x${height} to ${new_width}x${new_height}"
             fi
 
-            # Ensure new position accounts for the (possibly resized) window dimensions
-            if [[ $((new_x + new_width)) -gt $screen_width ]]; then
-                new_x=$((screen_width - new_width - 20))
-                if [[ $new_x -lt 0 ]]; then new_x=10; fi
-            fi
-            if [[ $((new_y + new_height)) -gt $screen_height ]]; then
-                new_y=$((screen_height - new_height - 20))
-                if [[ $new_y -lt 0 ]]; then new_y=10; fi
-            fi
+            # Calculate position for rescued window
+            local new_position=($(position_rescued_window "$new_width" "$new_height" "$screen_width" "$screen_height" "$moved_count"))
+            local new_x=${new_position[0]}
+            local new_y=${new_position[1]}
 
             # Move and optionally resize window
             wmctrl -i -r "$wid" -e "0,$new_x,$new_y,$new_width,$new_height" 2>/dev/null
@@ -426,7 +587,9 @@ function rescue_windows() {
     fi
 }
 
-function switch_audio() {
+# === AUDIO MANAGEMENT FUNCTIONS ===
+
+switch_audio() {
     log_debug "Configuring audio output"
     
     # Use the X_USER detected earlier, or try to find audio user session
@@ -460,6 +623,71 @@ function switch_audio() {
     fi
 }
 
+# === ACTION HANDLERS ===
+
+handle_extend_action() {
+    # External displays connected but not active - extend desktop
+    local connected_external=($(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | cut -d' ' -f1))
+
+    log_info "Extending desktop to ${#connected_external[@]} external display(s): ${connected_external[*]}"
+
+    # Turn off any disconnected displays first
+    for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
+        run_xrandr_cmd "--output $display --off"
+    done
+
+    # Configure each connected external display with normal rotation
+    for display in "${connected_external[@]}"; do
+        run_xrandr_cmd "--output $display --auto --set audio on --$DISPLAY_POSITION $PRIMARY_DISPLAY --rotate normal"
+    done
+}
+
+handle_rotate_action() {
+    # External displays are active with normal rotation - rotate them
+    local active_external=($(get_active_external_displays))
+
+    log_info "Rotating ${#active_external[@]} active external display(s): ${active_external[*]}"
+
+    for display in "${active_external[@]}"; do
+        run_xrandr_cmd "--output $display --rotate $DISPLAY_ROTATION"
+    done
+}
+
+handle_unrotate_action() {
+    # External displays are active and rotated - unrotate them
+    local active_external=($(get_active_external_displays))
+
+    log_info "Unrotating ${#active_external[@]} active external display(s): ${active_external[*]}"
+
+    for display in "${active_external[@]}"; do
+        run_xrandr_cmd "--output $display --rotate normal"
+    done
+}
+
+handle_cleanup_action() {
+    # External displays were unplugged - turn them off and rescue windows
+    log_info "Cleaning up unplugged external displays and resetting to primary display"
+
+    # Turn off all disconnected displays and reset primary display
+    run_xrandr_cmd "--output $PRIMARY_DISPLAY --primary --auto"
+
+    for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
+        run_xrandr_cmd "--output $display --off"
+    done
+
+    # Wait for X11 to finish repositioning windows after display changes
+    sleep 2
+
+    # Rescue orphaned windows that may be off-screen after display reset
+    log_debug "Rescuing windows after display cleanup"
+    if is_running_as_root_for_user; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(declare -f rescue_windows); rescue_windows" 2>/dev/null
+    else
+        rescue_windows
+    fi
+}
+
+# === MAIN EXECUTION FLOW ===
 
 # Atomic lock with cooldown to prevent rapid successive executions
 # Use flock-style locking with a short cooldown period
@@ -479,14 +707,8 @@ if [[ -f "$LOCKFILE" ]]; then
     fi
 fi
 
-# Set up cleanup trap to maintain lock briefly after completion
-cleanup_lock() {
-    # Keep lock for 2 seconds after completion (reduced due to state tracking)
-    sleep 2
-    flock -u 200
-    rm -f "$LOCKFILE"
-}
-trap cleanup_lock EXIT
+# Set up cleanup trap
+trap 'cleanup_and_exit $?' EXIT INT TERM
 
 
 # Set up X11 environment for udev context
@@ -556,11 +778,11 @@ while getopts ":ih" opt; do
 done
 shift $((OPTIND -1))
 
+# Check dependencies before proceeding
+check_dependencies
+
 # Cache xrandr output once for the entire script
-if ! cache_xrandr_output; then
-    log_error "Failed to get display information, exiting"
-    exit 1
-fi
+cache_xrandr_output || die "Failed to get display information"
 
 # Determine what action to take based on current display state
 ACTION=$(determine_action)
@@ -572,62 +794,20 @@ case "$ACTION" in
         exit 0
         ;;
     "extend")
-        # External displays connected but not active - extend desktop
-        connected_external=($(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | cut -d' ' -f1))
-
-        log_info "Extending desktop to ${#connected_external[@]} external display(s): ${connected_external[*]}"
-
-        # Turn off any disconnected displays first
-        for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
-            run_xrandr_cmd "--output $display --off"
-        done
-
-        # Configure each connected external display with normal rotation
-        for display in "${connected_external[@]}"; do
-            run_xrandr_cmd "--output $display --auto --set audio on --above eDP-1 --rotate normal"
-        done
+        handle_extend_action
+        # Wait for X11 to complete display configuration changes before WindowMaker restart
+        sleep 1
         ;;
     "rotate")
-        # External displays are active with normal rotation - rotate them
-        active_external=($(get_active_external_displays))
-
-        log_info "Rotating ${#active_external[@]} active external display(s): ${active_external[*]}"
-
-        for display in "${active_external[@]}"; do
-            run_xrandr_cmd "--output $display --rotate left"
-        done
+        handle_rotate_action
         ;;
     "unrotate")
-        # External displays are active and rotated - unrotate them
-        active_external=($(get_active_external_displays))
-
-        log_info "Unrotating ${#active_external[@]} active external display(s): ${active_external[*]}"
-
-        for display in "${active_external[@]}"; do
-            run_xrandr_cmd "--output $display --rotate normal"
-        done
+        handle_unrotate_action
         ;;
     "cleanup")
-        # External displays were unplugged - turn them off and rescue windows
-        log_info "Cleaning up unplugged external displays and resetting to primary display"
-
-        # Turn off all disconnected displays and reset primary display
-        run_xrandr_cmd "--output eDP-1 --primary --auto"
-
-        for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
-            run_xrandr_cmd "--output $display --off"
-        done
-
-        # Wait for X11 to finish repositioning windows after display changes
-        sleep 2
-
-        # Rescue orphaned windows that may be off-screen after display reset
-        log_debug "Rescuing windows after display cleanup"
-        if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-            su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(declare -f rescue_windows); rescue_windows" 2>/dev/null
-        else
-            rescue_windows
-        fi
+        handle_cleanup_action
+        # Wait for X11 to complete display configuration changes before WindowMaker restart
+        sleep 1
         ;;
 esac
 
