@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Script to display OSD notifications for screen connect/disconnect events
+# Designed to be called from udev rules for lightweight display detection
+
+# Check if required commands are available
+if ! command -v dunstify >/dev/null 2>&1; then
+    logger -t screen-notify "Error: dunstify not found"
+    exit 1
+fi
+
+if ! command -v xrandr >/dev/null 2>&1; then
+    logger -t screen-notify "Error: xrandr not found"
+    exit 1
+fi
+
+# Detect X11 session user (needed for udev context)
+X_USER=""
+if [[ -n "$USER" && "$USER" != "root" ]]; then
+    X_USER="$USER"
+elif [[ -S /tmp/.X11-unix/X0 ]]; then
+    X_USER=$(stat -c %U /tmp/.X11-unix/X0 2>/dev/null)
+fi
+
+if [[ -z "$X_USER" || "$X_USER" == "root" ]]; then
+    logger -t screen-notify "No X11 session user found"
+    exit 1
+fi
+
+# Set up display environment
+export DISPLAY=":0"
+export XAUTHORITY="/home/$X_USER/.Xauthority"
+
+function get_display_icon() {
+    # get_display_icon <CONNECTED_COUNT>
+    local count=$1
+
+    # Use full paths to ensure icons are found
+    if [ "$count" -eq 0 ]; then
+        echo "/usr/share/icons/Adwaita/symbolic/devices/video-single-display-symbolic.svg"
+    elif [ "$count" -eq 1 ]; then
+        echo "/usr/share/icons/Adwaita/symbolic/devices/video-joined-displays-symbolic.svg"
+    else
+        echo "/usr/share/icons/Adwaita/symbolic/legacy/preferences-desktop-display-symbolic.svg"
+    fi
+}
+
+function show_display_notification() {
+    local title="$1"
+    local message="$2"
+    local icon="$3"
+    local timeout=3000
+
+    # Run notification as the X11 user - positioned in bottom-left via dunst config
+    # Add hint to make notification sticky (appear on all workspaces)
+    if [[ "$(whoami)" == "root" ]]; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY dunstify -a screen-notify -r 777 -i '$icon' -t $timeout -h int:transient:0 -u normal '$title' '$message'" 2>/dev/null
+    else
+        dunstify -a screen-notify -r 777 -i "$icon" -t $timeout -h int:transient:0 -u normal "$title" "$message" 2>/dev/null
+    fi
+}
+
+# Get current display information
+if [[ "$(whoami)" == "root" ]]; then
+    XRANDR_OUTPUT=$(su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY xrandr -q" 2>/dev/null)
+else
+    XRANDR_OUTPUT=$(xrandr -q 2>/dev/null)
+fi
+
+if [[ -z "$XRANDR_OUTPUT" ]]; then
+    logger -t screen-notify "Failed to get xrandr output"
+    exit 1
+fi
+
+# Count connected external displays (excluding primary/built-in)
+EXTERNAL_DISPLAYS=$(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | wc -l)
+TOTAL_DISPLAYS=$(echo "$XRANDR_OUTPUT" | grep ' connected' | wc -l)
+
+# Get list of connected external display names
+EXTERNAL_LIST=$(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | cut -d' ' -f1 | tr '\n' ' ' | sed 's/ $//')
+
+# Determine notification content
+if [[ $EXTERNAL_DISPLAYS -eq 0 ]]; then
+    # Only built-in display connected
+    TITLE="Display Disconnected"
+    MESSAGE="Using built-in display only"
+    ICON=$(get_display_icon 0)
+elif [[ $EXTERNAL_DISPLAYS -eq 1 ]]; then
+    # One external display connected
+    TITLE="External Display Connected"
+    MESSAGE="$EXTERNAL_LIST detected"
+    ICON=$(get_display_icon 1)
+else
+    # Multiple external displays connected
+    TITLE="Multiple Displays Connected"
+    MESSAGE="$EXTERNAL_DISPLAYS external displays: $EXTERNAL_LIST"
+    ICON=$(get_display_icon $EXTERNAL_DISPLAYS)
+fi
+
+# Show the notification
+show_display_notification "$TITLE" "$MESSAGE" "$ICON"
+
+# Log the event for debugging
+logger -t screen-notify "$TITLE: $MESSAGE"
