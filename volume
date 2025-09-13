@@ -1,0 +1,99 @@
+#!/bin/bash
+set -x
+
+FUNC=$1
+STEP=2
+SERVER_STRING=$(pactl info |grep "Server String" |cut -d ':' -f 2 |sed 's/^\ *//g' |sed 's/\/native//g')
+ACTIVE_SINK=$(pactl list short sinks |grep 'RUNNING' |cut -f 1)
+#SINK_NAME=$(pactl list cards \
+#    |grep -A10 "Card #${ACTIVE_SINK}" \
+#    |grep "alsa.card_name" \
+#    |cut -d '"' -f 2 \
+#    |sed 's/)/\\)/g' \
+#    )
+CARD_NAME=$(pactl list \
+    |grep -A3 "RUNNING" \
+    |grep "Description" \
+    |cut -d ':' -f 2 )
+#    |sed 's/)/\\)/g' \
+#    |perl -pe 's/[\r\n]/\ /g')
+export PULSE_RUNTIME_PATH="$SERVER_STRING"
+
+function getProgressString() {
+    # getProgressString <TOTAL ITEMS> <FILLED LOOK> <NOT FILLED LOOK> <STATUS>
+    # For instance:
+    # $ getProgressString 10 "#" "-" 50
+    # #####-----
+    # Note: if you want to use | in your progress bar string you need to change the delimiter in the sed commands
+
+    ITEMS="$1" # The total number of items(the width of the bar)
+    FILLED_ITEM="$2" # The look of a filled item 
+    NOT_FILLED_ITEM="$3" # The look of a not filled item
+    STATUS="$4" # The current progress status in percent
+
+    # calculate how many items need to be filled and not filled
+    FILLED_ITEMS=$(echo "((${ITEMS} * ${STATUS})/100 + 0.5) / 1" | bc)
+    NOT_FILLED_ITEMS=$(echo "$ITEMS - $FILLED_ITEMS" | bc)
+
+    # Assemble the bar string
+    msg=$(printf "%${FILLED_ITEMS}s" | sed "s| |${FILLED_ITEM}|g")
+    msg=${msg}$(printf "%${NOT_FILLED_ITEMS}s" | sed "s| |${NOT_FILLED_ITEM}|g")
+    echo "$msg"
+}
+
+function getVolumeIcon() {
+    # getVolumeIcon <VOLUME>
+
+    VOLUME=$1
+
+    if [ $VOLUME -eq 0 ] ; then
+        echo audio-volume-muted
+    elif [ $VOLUME -le 33 ] ; then
+        echo audio-volume-low
+    elif [ $VOLUME -le 66 ] ; then
+        echo audio-volume-medium
+    else
+        echo audio-volume-high
+    fi
+}
+
+case "x$FUNC" in
+    "xinc")
+        pactl set-sink-volume $ACTIVE_SINK +${STEP}%
+    ;;
+    xdec)
+        pactl set-sink-volume $ACTIVE_SINK -${STEP}%
+    ;;
+    "xmute")
+        CUR=$(pactl list sinks \
+            |grep -A10 "Sink #${ACTIVE_SINK}" \
+            |grep "Mute:" \
+            |awk '{ print $2 }' )
+        if [ "x$CUR" == "xno" ] ; then
+            pacmd set-sink-mute $ACTIVE_SINK 1
+            VOL=0
+        else
+            pacmd set-sink-mute $ACTIVE_SINK 0
+        fi
+    ;;
+    *)
+        echo "Error: command not recognized"
+    ;;
+esac
+
+[ "x$VOL" == "x" ] && VOL=$(pactl list sinks \
+    |grep -A10 "Sink #${ACTIVE_SINK}" \
+    |grep "Volume:" \
+    |perl -pe 's/[^\d]*\d[^\d]*\d+[\s\/]+(\d+)\%.*/$1/g' )
+
+#VOL=$(( VOL / 2 ))
+#osdctl -e "dset(b)"
+#osdctl -b "$CARD_NAME",$VOL
+
+dunstify -a volume \
+    -r 555 \
+    -i $(getVolumeIcon $VOL) \
+    -h string:x-canonical-private-synchronous:volume \
+    -t 2000 \
+    "$CARD_NAME" \
+    "<b>$(getProgressString 20 "─" "·" $VOL) ${VOL}%</b>"
