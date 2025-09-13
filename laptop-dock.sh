@@ -362,13 +362,13 @@ if [[ ${#SCR[@]} -eq 0 ]]; then
 fi
 
 
-# Notify WindowMaker of display changes via SIGHUP (reload configuration)
-# This is gentler than restarting and preserves window state
-log_debug "Notifying WindowMaker of display changes"
-if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-    su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY pkill -HUP -f '/usr/libexec/WindowMaker/wmaker'" 2>/dev/null || log_debug "WindowMaker reload signal sent or not found"
+# Restart WindowMaker to detect display changes
+log_debug "Restarting WindowMaker to refresh display configuration"
+WMAKER_PID=$(pgrep -f "wmaker --for-real" | head -1)
+if [[ -n "$WMAKER_PID" ]]; then
+    kill -USR1 "$WMAKER_PID" && log_info "WindowMaker restart signal sent to PID $WMAKER_PID" || log_warn "Failed to send WindowMaker restart signal to PID $WMAKER_PID"
 else
-    pkill -HUP -f '/usr/libexec/WindowMaker/wmaker' 2>/dev/null || log_debug "WindowMaker reload signal sent or not found"
+    log_warn "WindowMaker main process not found, skipping restart signal"
 fi
 
 # Configure audio and other settings
