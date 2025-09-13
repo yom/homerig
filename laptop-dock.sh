@@ -113,6 +113,53 @@ function run_using_same_user() {
     fi
 }
 
+function rescue_windows() {
+    log_debug "Checking for orphaned windows on disconnected displays"
+    
+    # Get current screen dimensions
+    local screen_info=$(xrandr -q 2>/dev/null | grep "^Screen 0:" | grep -o "current [0-9]* x [0-9]*" | awk '{print $2, $4}')
+    local screen_width=$(echo $screen_info | awk '{print $1}')
+    local screen_height=$(echo $screen_info | awk '{print $2}')
+    
+    if [[ -z "$screen_width" || -z "$screen_height" ]]; then
+        log_warn "Could not determine screen dimensions for window rescue"
+        return 1
+    fi
+    
+    log_debug "Screen dimensions: ${screen_width}x${screen_height}"
+    
+    # Use wmctrl to find and move orphaned windows
+    if command -v wmctrl >/dev/null 2>&1; then
+        local moved_count=0
+        while IFS=' ' read -r wid desktop x y width height hostname title; do
+            # Skip if window coordinates are within screen bounds
+            if [[ $x -ge 0 && $y -ge 0 && $x -lt $screen_width && $y -lt $screen_height ]]; then
+                continue
+            fi
+            
+            # Move window to visible area (top-left with some padding)
+            local new_x=$((50 + (moved_count * 30)))
+            local new_y=$((50 + (moved_count * 30)))
+            
+            # Ensure new position is within bounds
+            if [[ $new_x -gt $((screen_width - 200)) ]]; then new_x=50; fi
+            if [[ $new_y -gt $((screen_height - 200)) ]]; then new_y=50; fi
+            
+            wmctrl -i -r "$wid" -e "0,$new_x,$new_y,-1,-1" 2>/dev/null
+            log_info "Moved window '$title' from off-screen position to ${new_x},${new_y}"
+            ((moved_count++))
+            
+        done < <(wmctrl -lG 2>/dev/null | grep -v "^0x.*-1 ")
+        
+        if [[ $moved_count -gt 0 ]]; then
+            log_info "Rescued $moved_count orphaned window(s)"
+        fi
+    else
+        log_warn "wmctrl not available - cannot rescue orphaned windows"
+        log_info "Install wmctrl for automatic window management: sudo apt install wmctrl"
+    fi
+}
+
 function switch_audio() {
     log_debug "Configuring audio output"
     
@@ -303,6 +350,25 @@ if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
     su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $cmd" 2>/dev/null || log_warn "xrandr command failed"
 else
     eval "$cmd" || log_warn "xrandr command failed"
+fi
+
+# If no external displays are connected, rescue orphaned windows
+if [[ ${#SCR[@]} -eq 0 ]]; then
+    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(declare -f rescue_windows); rescue_windows" 2>/dev/null
+    else
+        rescue_windows
+    fi
+fi
+
+
+# Notify WindowMaker of display changes via SIGHUP (reload configuration)
+# This is gentler than restarting and preserves window state
+log_debug "Notifying WindowMaker of display changes"
+if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
+    su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY pkill -HUP -f '/usr/libexec/WindowMaker/wmaker'" 2>/dev/null || log_debug "WindowMaker reload signal sent or not found"
+else
+    pkill -HUP -f '/usr/libexec/WindowMaker/wmaker' 2>/dev/null || log_debug "WindowMaker reload signal sent or not found"
 fi
 
 # Configure audio and other settings
