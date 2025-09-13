@@ -120,6 +120,117 @@ function get_display_state() {
         awk '{print $1 ":" $2}' | sort
 }
 
+function get_external_displays_info() {
+    # Get detailed info about external displays (connected, not primary)
+    # Returns: display_name:status:resolution:rotation
+    echo "$XRANDR_OUTPUT" | \
+        grep ' connected' | \
+        grep -v 'primary' | \
+        while read -r line; do
+            local display=$(echo "$line" | awk '{print $1}')
+            local resolution=$(echo "$line" | grep -o '[0-9]\+x[0-9]\+' | head -1)
+            local rotation=$(echo "$line" | grep -o '\(left\|right\|inverted\|normal\)' | head -1)
+
+            # Check if display is active (has resolution configured)
+            if [[ -n "$resolution" ]]; then
+                echo "$display:active:$resolution:${rotation:-normal}"
+            else
+                echo "$display:inactive::normal"
+            fi
+        done
+}
+
+function get_active_external_displays() {
+    # Get list of external displays that are currently active/configured
+    get_external_displays_info | grep ':active:' | cut -d: -f1
+}
+
+function get_external_display_rotation() {
+    # Get rotation state of a specific external display
+    local display="$1"
+    get_external_displays_info | grep "^$display:" | cut -d: -f4
+}
+
+function run_xrandr_cmd() {
+    # Execute xrandr command with proper user context
+    local xrandr_args="$1"
+    local cmd="/usr/bin/xrandr --display $DISPLAY $xrandr_args"
+
+    log_debug "Running xrandr command: $cmd"
+
+    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $cmd" 2>/dev/null || {
+            log_warn "xrandr command failed: $cmd"
+            return 1
+        }
+    else
+        eval "$cmd" || {
+            log_warn "xrandr command failed: $cmd"
+            return 1
+        }
+    fi
+}
+
+function determine_action() {
+    # Determine what action to take based on current display state
+    # Returns: extend|rotate|unrotate|cleanup
+
+    local connected_external=($(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | cut -d' ' -f1))
+    local active_external=($(get_active_external_displays))
+
+    # Check previous state to detect if external displays were unplugged
+    local previous_state=$(load_previous_state)
+    local had_external_before=false
+
+    # Parse previous state to see if we had active external displays
+    if [[ -n "$previous_state" ]]; then
+        # Look for connected external displays in previous state
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[^:]+:connected$ ]] && [[ "$line" != "eDP-1:connected" ]]; then
+                had_external_before=true
+                break
+            fi
+        done <<< "$previous_state"
+    fi
+
+    log_debug "Connected external displays: ${connected_external[*]}"
+    log_debug "Active external displays: ${active_external[*]}"
+    log_debug "Had external displays before: $had_external_before"
+
+    if [[ ${#connected_external[@]} -eq 0 ]]; then
+        # No external displays connected
+        if [[ "$had_external_before" == "true" ]]; then
+            # But we had external displays before - cleanup needed
+            log_debug "Action determined: cleanup (external displays were unplugged)"
+            echo "cleanup"
+        else
+            # Nothing to do
+            log_debug "Action determined: none (no external displays)"
+            echo "none"
+        fi
+    elif [[ ${#active_external[@]} -eq 0 ]]; then
+        # External displays connected but not active - extend desktop
+        log_debug "Action determined: extend (external displays connected but not active)"
+        echo "extend"
+    else
+        # External displays are active - check rotation state
+        local first_active="${active_external[0]}"
+        local current_rotation=$(get_external_display_rotation "$first_active")
+
+        log_debug "First active display: $first_active, rotation: $current_rotation"
+
+        if [[ "$current_rotation" == "normal" ]]; then
+            # Currently normal - rotate it
+            log_debug "Action determined: rotate (display is active and normal)"
+            echo "rotate"
+        else
+            # Currently rotated - unrotate it
+            log_debug "Action determined: unrotate (display is active and rotated)"
+            echo "unrotate"
+        fi
+    fi
+}
+
 function get_statefile_path() {
     # Get the right state file path based on context
     if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
@@ -385,108 +496,74 @@ if ! cache_xrandr_output; then
     exit 1
 fi
 
-# Check if display state has actually changed
-if ! check_and_handle_state_change; then
-    exit 0  # No change detected, exit early
-fi
+# Determine what action to take based on current display state
+ACTION=$(determine_action)
+log_info "Determined action: $ACTION"
 
-# Use cached xrandr output
-xrandr_tmp=$(mktemp)
-echo "$XRANDR_OUTPUT" > "$xrandr_tmp"
+case "$ACTION" in
+    "none")
+        log_debug "No action needed, exiting"
+        exit 0
+        ;;
+    "extend")
+        # External displays connected but not active - extend desktop
+        connected_external=($(echo "$XRANDR_OUTPUT" | grep ' connected' | grep -v 'primary' | cut -d' ' -f1))
 
-# Find disconnected displays to turn off
-off_screens=""
-disconnected_displays=()
-for display in $(grep 'disconnected' "$xrandr_tmp" | cut -d' ' -f1); do
-    off_screens="$off_screens --output $display --off"
-    disconnected_displays+=("$display")
-done
+        log_info "Extending desktop to ${#connected_external[@]} external display(s): ${connected_external[*]}"
 
-if [[ ${#disconnected_displays[@]} -gt 0 ]]; then
-    log_info "Turning off ${#disconnected_displays[@]} disconnected display(s): ${disconnected_displays[*]}"
-fi
-log_debug "Disconnected displays to turn off:$off_screens"
+        # Turn off any disconnected displays first
+        for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
+            run_xrandr_cmd "--output $display --off"
+        done
 
-# Find connected external displays (excluding primary)
-declare -a SCR POS ROT
-connected_displays=$(grep ' connected' "$xrandr_tmp" | grep -v 'primary' | cut -d' ' -f1)
-SCR=( $connected_displays )
-if [[ ${#SCR[@]} -gt 0 ]]; then
-    log_info "Found ${#SCR[@]} external display(s): ${SCR[*]}"
-else
-    log_debug "No external displays connected"
-fi
-log_debug "Raw connected displays: $(grep ' connected' "$xrandr_tmp")"
-log_debug "After filtering primary: $(grep ' connected' "$xrandr_tmp" | grep -v 'primary')"
+        # Configure each connected external display with normal rotation
+        for display in "${connected_external[@]}"; do
+            run_xrandr_cmd "--output $display --auto --set audio on --above eDP-1 --rotate normal"
+        done
+        ;;
+    "rotate")
+        # External displays are active with normal rotation - rotate them
+        active_external=($(get_active_external_displays))
 
-# Set display positioning and rotation based on swap state
-POS=( "--above eDP-1" "--right-of eDP-1" )
-ROT=("normal" "left")
-if [[ $SWAP_SCR -eq 1 ]]; then
-    POS=( "--right-of eDP-1" "--above eDP-1" )
-    ROT=("left" "normal")
-    log_debug "Using swapped display configuration"
-else
-    log_debug "Using default display configuration"
-fi
+        log_info "Rotating ${#active_external[@]} active external display(s): ${active_external[*]}"
 
-rm -f "$xrandr_tmp"
+        for display in "${active_external[@]}"; do
+            run_xrandr_cmd "--output $display --rotate left"
+        done
+        ;;
+    "unrotate")
+        # External displays are active and rotated - unrotate them
+        active_external=($(get_active_external_displays))
 
-# Set default display options
-readonly DEF_OPTS="--auto --set audio on"
+        log_info "Unrotating ${#active_external[@]} active external display(s): ${active_external[*]}"
 
-# Lock is already acquired above with flock
+        for display in "${active_external[@]}"; do
+            run_xrandr_cmd "--output $display --rotate normal"
+        done
+        ;;
+    "cleanup")
+        # External displays were unplugged - turn them off and rescue windows
+        log_info "Cleaning up unplugged external displays and resetting to primary display"
 
-# Build xrandr command
-cmd="/usr/bin/xrandr --display $DISPLAY"
-for i in "${!SCR[@]}"; do
-    cmd="$cmd --output ${SCR[$i]} $DEF_OPTS ${POS[$i]} --rotate ${ROT[$i]}"
-    log_debug "Display ${SCR[$i]}: position=${POS[$i]}, rotation=${ROT[$i]}"
-done
-cmd="$cmd $off_screens"
+        # Turn off all disconnected displays and reset primary display
+        run_xrandr_cmd "--output eDP-1 --primary --auto"
 
-log_debug "xrandr command: $cmd"
+        for display in $(echo "$XRANDR_OUTPUT" | grep 'disconnected' | cut -d' ' -f1); do
+            run_xrandr_cmd "--output $display --off"
+        done
 
-# Smart xrandr commands: separate connect/disconnect logic
-if [[ ${#SCR[@]} -gt 0 ]]; then
-    # Configure connected external displays (one command per display)
-    for i in "${!SCR[@]}"; do
-        connect_cmd="/usr/bin/xrandr --display $DISPLAY --output ${SCR[$i]} $DEF_OPTS ${POS[$i]} --rotate ${ROT[$i]}"
-        log_debug "Configuring connected display: $connect_cmd"
+        # Wait for X11 to finish repositioning windows after display changes
+        sleep 2
 
+        # Rescue orphaned windows that may be off-screen after display reset
+        log_debug "Rescuing windows after display cleanup"
         if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-            su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $connect_cmd" 2>/dev/null || log_warn "connect command failed for ${SCR[$i]}"
+            su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(declare -f rescue_windows); rescue_windows" 2>/dev/null
         else
-            eval "$connect_cmd" || log_warn "connect command failed for ${SCR[$i]}"
+            rescue_windows
         fi
-    done
-else
-    # Turn off disconnected displays when no external displays are connected
-    if [[ -n "$off_screens" ]]; then
-        disconnect_cmd="/usr/bin/xrandr --display $DISPLAY $off_screens"
-        log_debug "Turning off disconnected displays: $disconnect_cmd"
-
-        if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-            su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $disconnect_cmd" 2>/dev/null || log_warn "disconnect command failed"
-        else
-            eval "$disconnect_cmd" || log_warn "disconnect command failed"
-        fi
-    fi
-fi
-
-# If no external displays are connected, rescue orphaned windows
-if [[ ${#SCR[@]} -eq 0 ]]; then
-    log_debug "No external displays connected, will rescue orphaned windows after delay"
-
-    # Wait for X11 to finish repositioning windows after display change
-    sleep 1
-
-    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(declare -f rescue_windows); rescue_windows" 2>/dev/null
-    else
-        rescue_windows
-    fi
-fi
+        ;;
+esac
 
 
 # Restart WindowMaker to detect display changes
