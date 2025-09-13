@@ -33,6 +33,10 @@ readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"  # DEBUG, INFO, WARN, ERROR
 readonly LOG_FORMAT="${LOG_FORMAT:-timestamp}"  # timestamp, simple
 readonly USE_JOURNALD="${USE_JOURNALD:-true}"  # Enable journald logging
 
+# Window rescue configuration
+readonly MIN_VISIBLE_RATIO="${MIN_VISIBLE_RATIO:-0.3}"  # Minimum ratio of window area that must be visible (0.0-1.0)
+readonly MAX_WINDOW_RATIO="${MAX_WINDOW_RATIO:-0.9}"    # Maximum ratio of screen area a rescued window can occupy (0.0-1.0)
+
 # Check if systemd-cat is available
 SYSTEMD_CAT_AVAILABLE=false
 if command -v systemd-cat >/dev/null 2>&1; then
@@ -333,21 +337,83 @@ function rescue_windows() {
     if command -v wmctrl >/dev/null 2>&1; then
         local moved_count=0
         while IFS=' ' read -r wid desktop x y width height hostname title; do
-            # Skip if window coordinates are within screen bounds
-            if [[ $x -ge 0 && $y -ge 0 && $x -lt $screen_width && $y -lt $screen_height ]]; then
-                continue
+            # Calculate visible area ratio to determine if window is orphaned
+            local visible_left=$((x > 0 ? x : 0))
+            local visible_top=$((y > 0 ? y : 0))
+            local visible_right=$(((x + width) < screen_width ? (x + width) : screen_width))
+            local visible_bottom=$(((y + height) < screen_height ? (y + height) : screen_height))
+
+            # Calculate visible dimensions (ensure non-negative)
+            local visible_width=$((visible_right > visible_left ? (visible_right - visible_left) : 0))
+            local visible_height=$((visible_bottom > visible_top ? (visible_bottom - visible_top) : 0))
+
+            # Calculate areas
+            local visible_area=$((visible_width * visible_height))
+            local total_area=$((width * height))
+
+            # Skip if window has sufficient visible area (avoid division by zero)
+            if [[ $total_area -gt 0 ]]; then
+                # Use integer arithmetic: visible_area * 1000 >= total_area * (MIN_VISIBLE_RATIO * 1000)
+                local min_visible_area_scaled=$(echo "$total_area * $MIN_VISIBLE_RATIO * 1000" | bc -l | cut -d. -f1)
+                local visible_area_scaled=$((visible_area * 1000))
+
+                if [[ $visible_area_scaled -ge $min_visible_area_scaled ]]; then
+                    log_debug "Window '$title' has sufficient visible area (${visible_area}/${total_area}), skipping"
+                    continue
+                fi
+
+                log_debug "Window '$title' is orphaned with visible ratio $(echo "scale=2; $visible_area / $total_area" | bc -l) (threshold: $MIN_VISIBLE_RATIO)"
+            else
+                log_debug "Window '$title' has zero area, considering as orphaned"
             fi
 
-            # Move window to visible area (top-left with some padding)
+            # Calculate target position with padding
             local new_x=$((50 + (moved_count * 30)))
             local new_y=$((50 + (moved_count * 30)))
 
-            # Ensure new position is within bounds
-            if [[ $new_x -gt $((screen_width - 200)) ]]; then new_x=50; fi
-            if [[ $new_y -gt $((screen_height - 200)) ]]; then new_y=50; fi
+            # Check if window needs resizing (too large for current screen)
+            local max_width=$(echo "$screen_width * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
+            local max_height=$(echo "$screen_height * $MAX_WINDOW_RATIO" | bc -l | cut -d. -f1)
+            local new_width=$width
+            local new_height=$height
 
-            wmctrl -i -r "$wid" -e "0,$new_x,$new_y,-1,-1" 2>/dev/null
-            log_debug "Moved window '$title' from off-screen position to ${new_x},${new_y}"
+            if [[ $width -gt $max_width || $height -gt $max_height ]]; then
+                # Calculate scaling factors for both dimensions
+                local scale_x_scaled=$((max_width * 1000 / width))  # Scale factor * 1000
+                local scale_y_scaled=$((max_height * 1000 / height))
+
+                # Use the smaller scale factor to preserve aspect ratio
+                local scale_factor_scaled
+                if [[ $scale_x_scaled -lt $scale_y_scaled ]]; then
+                    scale_factor_scaled=$scale_x_scaled
+                else
+                    scale_factor_scaled=$scale_y_scaled
+                fi
+
+                # Apply scaling (divide by 1000 to get back to normal scale)
+                new_width=$((width * scale_factor_scaled / 1000))
+                new_height=$((height * scale_factor_scaled / 1000))
+
+                log_debug "Resizing oversized window '$title' from ${width}x${height} to ${new_width}x${new_height}"
+            fi
+
+            # Ensure new position accounts for the (possibly resized) window dimensions
+            if [[ $((new_x + new_width)) -gt $screen_width ]]; then
+                new_x=$((screen_width - new_width - 20))
+                if [[ $new_x -lt 0 ]]; then new_x=10; fi
+            fi
+            if [[ $((new_y + new_height)) -gt $screen_height ]]; then
+                new_y=$((screen_height - new_height - 20))
+                if [[ $new_y -lt 0 ]]; then new_y=10; fi
+            fi
+
+            # Move and optionally resize window
+            wmctrl -i -r "$wid" -e "0,$new_x,$new_y,$new_width,$new_height" 2>/dev/null
+            if [[ $new_width -ne $width || $new_height -ne $height ]]; then
+                log_debug "Rescued and resized window '$title' to position ${new_x},${new_y} size ${new_width}x${new_height}"
+            else
+                log_debug "Rescued window '$title' to position ${new_x},${new_y}"
+            fi
             ((moved_count++))
 
         done < <(wmctrl -lG 2>/dev/null | grep -v "^0x.*-1 ")
