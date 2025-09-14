@@ -1,0 +1,10 @@
+# Udev rules to show battery notifications when AC adapter is plugged/unplugged
+# Monitors both AC adapter and battery power supply changes
+
+# AC adapter plugged/unplugged
+ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="AC", \
+    RUN+="/home/yom/git/dotfiles/battery"
+
+# Battery status changes (charging/discharging/full)
+ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="BAT*", \
+    RUN+="/home/yom/git/dotfiles/battery"
