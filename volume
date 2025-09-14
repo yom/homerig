@@ -1,22 +1,45 @@
 #!/bin/bash
-set -x
 
+# Validate function parameter
 FUNC=$1
+if [ -z "$FUNC" ]; then
+    echo "Usage: $0 {inc|dec|mute}"
+    exit 1
+fi
+
+# Check if required commands are available
+if ! command -v pactl >/dev/null 2>&1; then
+    echo "Error: pactl not found. Install PulseAudio: sudo apt install pulseaudio-utils"
+    exit 1
+fi
+
+if ! command -v dunstify >/dev/null 2>&1; then
+    echo "Error: dunstify not found. Install: sudo apt install dunst"
+    exit 1
+fi
+
+# Check if PulseAudio is running
+if ! pactl info >/dev/null 2>&1; then
+    echo "Error: PulseAudio not running"
+    exit 1
+fi
 STEP=2
 SERVER_STRING=$(pactl info |grep "Server String" |cut -d ':' -f 2 |sed 's/^\ *//g' |sed 's/\/native//g')
-ACTIVE_SINK=$(pactl list short sinks |grep 'RUNNING' |cut -f 1)
-#SINK_NAME=$(pactl list cards \
-#    |grep -A10 "Card #${ACTIVE_SINK}" \
-#    |grep "alsa.card_name" \
-#    |cut -d '"' -f 2 \
-#    |sed 's/)/\\)/g' \
-#    )
-CARD_NAME=$(pactl list \
-    |grep -A3 "RUNNING" \
-    |grep "Description" \
-    |cut -d ':' -f 2 )
-#    |sed 's/)/\\)/g' \
-#    |perl -pe 's/[\r\n]/\ /g')
+# Get default sink (works regardless of whether audio is playing)
+ACTIVE_SINK=$(pactl get-default-sink 2>/dev/null)
+
+# Fallback to first available sink if get-default-sink fails
+if [ -z "$ACTIVE_SINK" ]; then
+    ACTIVE_SINK=$(pactl list short sinks | head -1 | cut -f2)
+fi
+
+# Verify we have a valid sink
+if [ -z "$ACTIVE_SINK" ]; then
+    echo "Error: No audio sinks found"
+    exit 1
+fi
+# Get card description for the active sink
+CARD_NAME=$(pactl list sinks | grep -A10 "Name: ${ACTIVE_SINK}" | grep "Description:" | cut -d':' -f2- | sed 's/^ *//')
 export PULSE_RUNTIME_PATH="$SERVER_STRING"
 
 function getProgressString() {
@@ -59,21 +82,27 @@ function getVolumeIcon() {
 
 case "x$FUNC" in
     "xinc")
-        pactl set-sink-volume $ACTIVE_SINK +${STEP}%
+        # Get current volume to check limits
+        CURRENT_VOL=$(pactl get-sink-volume "$ACTIVE_SINK" 2>/dev/null | grep -oP '\d+%' | head -1 | tr -d '%')
+        if [ -n "$CURRENT_VOL" ] && [ "$CURRENT_VOL" -le $((100 - STEP)) ]; then
+            pactl set-sink-volume $ACTIVE_SINK +${STEP}%
+        else
+            pactl set-sink-volume $ACTIVE_SINK 100%
+        fi
     ;;
     xdec)
         pactl set-sink-volume $ACTIVE_SINK -${STEP}%
     ;;
     "xmute")
         CUR=$(pactl list sinks \
-            |grep -A10 "Sink #${ACTIVE_SINK}" \
+            |grep -A10 "Name: ${ACTIVE_SINK}" \
             |grep "Mute:" \
             |awk '{ print $2 }' )
         if [ "x$CUR" == "xno" ] ; then
-            pacmd set-sink-mute $ACTIVE_SINK 1
+            pactl set-sink-mute $ACTIVE_SINK 1
             VOL=0
         else
-            pacmd set-sink-mute $ACTIVE_SINK 0
+            pactl set-sink-mute $ACTIVE_SINK 0
         fi
     ;;
     *)
@@ -81,14 +110,14 @@ case "x$FUNC" in
     ;;
 esac
 
-[ "x$VOL" == "x" ] && VOL=$(pactl list sinks \
-    |grep -A10 "Sink #${ACTIVE_SINK}" \
-    |grep "Volume:" \
-    |perl -pe 's/[^\d]*\d[^\d]*\d+[\s\/]+(\d+)\%.*/$1/g' )
-
-#VOL=$(( VOL / 2 ))
-#osdctl -e "dset(b)"
-#osdctl -b "$CARD_NAME",$VOL
+# Get current volume with improved parsing
+if [ "x$VOL" == "x" ]; then
+    VOL=$(pactl get-sink-volume "$ACTIVE_SINK" 2>/dev/null | grep -oP '\d+%' | head -1 | tr -d '%')
+    # Fallback to old method if get-sink-volume fails
+    if [ -z "$VOL" ]; then
+        VOL=$(pactl list sinks | grep -A10 "Name: ${ACTIVE_SINK}" | grep "Volume:" | grep -oP '\d+%' | head -1 | tr -d '%')
+    fi
+fi
 
 dunstify -a volume \
     -r 555 \
