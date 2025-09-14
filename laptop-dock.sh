@@ -807,7 +807,8 @@ case "$ACTION" in
     "cleanup")
         handle_cleanup_action
         # Wait for X11 to complete display configuration changes before WindowMaker restart
-        sleep 1
+        # Longer delay for cleanup due to complex display reset and window rescue operations
+        sleep 3
         ;;
 esac
 
