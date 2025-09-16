@@ -1,0 +1,9 @@
+# Generic USB device notification system
+# Triggers on any USB device connection/disconnection
+
+# Generic USB device events
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
+    RUN+="/bin/bash -c 'sleep 1; /home/yom/git/dotfiles/usb-device-notify add'"
+
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
+    RUN+="/home/yom/git/dotfiles/usb-device-notify remove"

@@ -1,0 +1,292 @@
+#!/bin/bash
+#
+# usb-device-notify - Generic USB device notification
+#
+# Simple and reliable USB device notifications with device type detection
+#
+
+# Configuration
+NOTIFICATION_ID=800
+NOTIFICATION_TIMEOUT=3000
+VERBOSE=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -v) VERBOSE=true; shift ;;
+        add|remove) ACTION="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+
+# Default action
+ACTION="${ACTION:-add}"
+
+# Debug function
+debug() {
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] $*" >&2
+}
+
+# User detection (copied from working battery script)
+detect_x_user() {
+    if [[ "$(whoami)" != "root" ]]; then
+        X_USER=$(whoami)
+        export DISPLAY="${DISPLAY:-:0}"
+        export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+        return 0
+    fi
+
+    # Method 1: Check who owns the X server process
+    X_USER=$(ps -eo user,comm 2>/dev/null | grep -E '(Xorg|X)$' | head -1 | awk '{print $1}' 2>/dev/null)
+
+    # Method 2: Check for active loginctl sessions if method 1 fails
+    if [[ -z "$X_USER" || "$X_USER" == "root" ]]; then
+        X_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | grep -v root | head -1 2>/dev/null)
+    fi
+
+    # Method 3: Fallback to checking process ownership of common desktop processes
+    if [[ -z "$X_USER" ]]; then
+        X_USER=$(ps -eo user,comm 2>/dev/null | grep -E '(gnome-session|kde|xfce|wmaker)' | head -1 | awk '{print $1}' 2>/dev/null)
+    fi
+
+    # Method 4: Final fallback - use the user who owns /tmp/.X11-unix/X0
+    if [[ -z "$X_USER" && -S /tmp/.X11-unix/X0 ]]; then
+        X_USER=$(stat -c %U /tmp/.X11-unix/X0 2>/dev/null)
+    fi
+
+    if [[ -n "$X_USER" && "$X_USER" != "root" ]]; then
+        export DISPLAY=":0"
+        export XAUTHORITY="/home/$X_USER/.Xauthority"
+        return 0
+    else
+        exit 0
+    fi
+}
+
+# Run command as X user
+run_as_x_user() {
+    if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
+        su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(printf '%q ' "$@")" 2>/dev/null
+    else
+        "$@" 2>/dev/null
+    fi
+}
+
+# Lookup device name in USB database
+lookup_usb_device() {
+    local vendor_id="$1"
+    local product_id="$2"
+    local usb_db="/usr/share/misc/usb.ids"
+    local vendor_name product_name
+    local padded_vendor_id padded_product_id
+
+    if [[ ! -f "$usb_db" || -z "$vendor_id" ]]; then
+        return 1
+    fi
+
+    # Pad IDs with leading zeros to match database format (4 digits)
+    # Simple padding: prepend zeros and take last 4 characters
+    padded_vendor_id="000$vendor_id"
+    padded_vendor_id="${padded_vendor_id: -4}"
+    padded_product_id="000$product_id"
+    padded_product_id="${padded_product_id: -4}"
+
+    # Look up vendor name (remove vendor ID and whitespace)
+    vendor_name=$(grep "^${padded_vendor_id}" "$usb_db" 2>/dev/null | sed "s/^${padded_vendor_id}[[:space:]]*//")
+
+    if [[ -n "$vendor_name" && -n "$padded_product_id" ]]; then
+        # Look up product name under this vendor
+        product_name=$(awk -v vid="$padded_vendor_id" -v pid="$padded_product_id" '
+            /^[0-9a-f]{4}/ { if ($1 == vid) in_vendor=1; else in_vendor=0 }
+            in_vendor && /^\t[0-9a-f]{4}/ { if ($1 == pid) { $1=""; print substr($0,2); exit } }
+        ' "$usb_db" 2>/dev/null)
+
+        if [[ -n "$product_name" ]]; then
+            echo "$vendor_name $product_name"
+        else
+            echo "$vendor_name USB Device"
+        fi
+        return 0
+    fi
+
+    return 1
+}
+
+# Get device info
+get_device_info() {
+    local vendor_id="$1"
+    local product_id="$2"
+    local device_name device_type
+
+    # Try lsusb first (for connected devices)
+    if [[ -n "$vendor_id" && -n "$product_id" ]]; then
+        device_name=$(lsusb -d "${vendor_id}:${product_id}" 2>/dev/null | cut -d' ' -f7-)
+    fi
+
+    # Fallback to USB database lookup (works for disconnected devices too!)
+    if [[ -z "$device_name" && -n "$vendor_id" && -n "$product_id" ]]; then
+        device_name=$(lookup_usb_device "$vendor_id" "$product_id")
+        debug "USB database lookup result: '$device_name'"
+    fi
+
+    # Final fallback name
+    if [[ -z "$device_name" ]]; then
+        device_name="USB Device"
+        if [[ -n "$vendor_id" && -n "$product_id" ]]; then
+            device_name="USB Device (${vendor_id}:${product_id})"
+        fi
+    fi
+
+    # Detect device type with enhanced patterns
+    if [[ "$device_name" =~ [Aa]udio|[Dd][Aa][Cc]|[Ss]ound|[Hh]eadset|[Mm]icrophone|[Ss]peaker|Audiophonics|SAVITECH ]]; then
+        device_type="audio"
+    elif [[ "$device_name" =~ [Mm]ouse|[Kk]eyboard|[Tt]rackpad|[Tt]ouchpad|Logitech|Razer|Microsoft.*Mouse|Optical.*Mouse|Wireless.*Mouse ]]; then
+        device_type="input"
+    elif [[ "$device_name" =~ [Ss]torage|[Dd]isk|[Ff]lash|[Dd]rive|[Cc]ard.*[Rr]eader|SanDisk|Kingston|USB.*Storage ]]; then
+        device_type="storage"
+    elif [[ "$device_name" =~ [Cc]amera|[Ww]ebcam|UVC|Video ]]; then
+        device_type="camera"
+    elif [[ "$device_name" =~ [Pp]rinter|HP|Canon|Epson ]]; then
+        device_type="printer"
+    elif [[ "$device_name" =~ [Bb]luetooth|BT ]]; then
+        device_type="bluetooth"
+    elif [[ "$device_name" =~ [Nn]etwork|[Ww]ifi|[Ee]thernet|[Aa]dapter|Realtek|Intel.*Wireless ]]; then
+        device_type="network"
+    else
+        device_type="generic"
+    fi
+
+    echo "${device_type}|${device_name}"
+}
+
+# Get notification details
+get_notification_details() {
+    local device_type="$1"
+    local action="$2"
+    local title icon
+
+    case "$device_type" in
+        audio)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Audio Disconnected"
+                icon="audio-volume-muted"
+            else
+                title="USB Audio Connected"
+                icon="audio-card"
+            fi
+            ;;
+        input)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Input Disconnected"
+                icon="input-mouse"
+            else
+                title="USB Input Connected"
+                icon="input-mouse"
+            fi
+            ;;
+        storage)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Storage Disconnected"
+                icon="drive-removable-media"
+            else
+                title="USB Storage Connected"
+                icon="drive-removable-media"
+            fi
+            ;;
+        camera)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Camera Disconnected"
+                icon="camera-video"
+            else
+                title="USB Camera Connected"
+                icon="camera-video"
+            fi
+            ;;
+        printer)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Printer Disconnected"
+                icon="printer"
+            else
+                title="USB Printer Connected"
+                icon="printer"
+            fi
+            ;;
+        bluetooth)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Bluetooth Disconnected"
+                icon="bluetooth"
+            else
+                title="USB Bluetooth Connected"
+                icon="bluetooth"
+            fi
+            ;;
+        network)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Network Disconnected"
+                icon="network-wired"
+            else
+                title="USB Network Connected"
+                icon="network-wired"
+            fi
+            ;;
+        *)
+            if [[ "$action" == "remove" ]]; then
+                title="USB Device Disconnected"
+                icon="usb"
+            else
+                title="USB Device Connected"
+                icon="usb"
+            fi
+            ;;
+    esac
+
+    echo "${title}|${icon}"
+}
+
+# Main execution
+debug "USB notification script starting (ACTION=$ACTION)"
+
+# Get vendor/product IDs from environment
+VENDOR_ID="${ID_VENDOR_ID:-}"
+PRODUCT_ID="${ID_MODEL_ID:-}"
+
+# If IDs are empty, try to parse from PRODUCT variable (format: vendorID/productID/version)
+if [[ -z "$VENDOR_ID" || -z "$PRODUCT_ID" ]] && [[ -n "$PRODUCT" ]]; then
+    VENDOR_ID="${PRODUCT%%/*}"  # Extract vendor ID (before first /)
+    temp="${PRODUCT#*/}"        # Remove vendor ID and first /
+    PRODUCT_ID="${temp%%/*}"    # Extract product ID (before next /)
+    debug "Parsed from PRODUCT=$PRODUCT: VENDOR_ID=$VENDOR_ID, PRODUCT_ID=$PRODUCT_ID"
+fi
+
+debug "VENDOR_ID=$VENDOR_ID, PRODUCT_ID=$PRODUCT_ID"
+
+# Detect X user
+detect_x_user
+
+# Get device information
+device_info=$(get_device_info "$VENDOR_ID" "$PRODUCT_ID")
+device_type="${device_info%%|*}"
+device_name="${device_info##*|}"
+
+debug "Device: $device_name (type: $device_type)"
+
+# Get notification details
+notification_details=$(get_notification_details "$device_type" "$ACTION")
+title="${notification_details%%|*}"
+icon="${notification_details##*|}"
+
+# Create message
+if [[ "$ACTION" == "remove" ]]; then
+    message="$device_name disconnected"
+else
+    message="$device_name connected"
+fi
+
+debug "Showing: $title - $message (icon: $icon)"
+
+# Show notification
+run_as_x_user dunstify -r "$NOTIFICATION_ID" -i "$icon" \
+    -t "$NOTIFICATION_TIMEOUT" \
+    "$title" "$message"
+
+debug "Notification completed"
