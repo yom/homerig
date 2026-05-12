@@ -1,0 +1,232 @@
+(
+  Applications,
+  (
+    Info,
+    ("Info Panel", INFO_PANEL),
+    (Legal, LEGAL_PANEL),
+    ("System Console", EXEC, xconsole),
+    ("System Load", SHEXEC, "xosview || xload"),
+    ("Process List", EXEC, "xterm -e top"),
+    ("Manual Browser", EXEC, xman)
+  ),
+  (Run..., EXEC, "%a(Run,Type command to run:)"),
+  (Terminal, SHORTCUT, "Mod1+t", EXEC, "xfce4-terminal"),
+  (Chrome, SHORTCUT, "Mod1+w", EXEC, "google-chrome"),
+  (Workspaces, WORKSPACE_MENU),
+  (
+    Applications,
+    (Pidgin, SHORTCUT, "Mod1+p", EXEC, pidgin),
+    (qbz, SHORTCUT, "Mod1+q", EXEC, qbz),
+    (Gimp, SHEXEC, "gimp >/dev/null"),
+    (Ghostview, EXEC, "ghostview %a(Enter file to view)"),
+    (Xpdf, EXEC, "xpdf %a(Enter PDF to view)"),
+    (Abiword, EXEC, abiword),
+    (Dia, EXEC, dia),
+    (
+      OpenOffice.org,
+      (OpenOffice.org, EXEC, ooffice),
+      (Writer, EXEC, oowriter),
+      (Spreadsheet, EXEC, oocalc),
+      (Draw, EXEC, oodraw),
+      (Impress, EXEC, ooimpress)
+    ),
+    (
+      Editors,
+      (XEmacs, EXEC, xemacs),
+      (Emacs, EXEC, emacs),
+      (XJed, EXEC, xjed),
+      (VI, EXEC, "xterm -e vi"),
+      (GVIM, EXEC, gvim),
+      (NEdit, EXEC, nedit),
+      (Xedit, EXEC, xedit)
+    ),
+    (
+      Multimedia,
+      (
+        XMMS,
+        (XMMS, SHORTCUT, "Mod1+x", EXEC, xmms),
+        ("XMMS play/pause", EXEC, "xmms -t"),
+        ("XMMS stop", EXEC, "xmms -s")
+      ),
+      (
+        "Volume mute",
+        SHORTCUT,
+        "Control+Mod1+Down",
+        EXEC,
+        "/usr/local/bin/volume mute"
+      ),
+      ("Volume up", SHORTCUT, "Mod1+Up", EXEC, "/usr/local/bin/volume inc"),
+      (
+        "Volume down",
+        SHORTCUT,
+        "Mod1+Down",
+        EXEC,
+        "/usr/local/bin/volume dec"
+      ),
+      (Exaile, SHORTCUT, "Mod4+e", EXEC, "/usr/bin/exaile"),
+      ("Xine video player", EXEC, xine),
+      (MPlayer, EXEC, mplayer)
+    )
+  ),
+  (
+    Utils,
+    ("Battery Status", SHORTCUT, "Mod1+b", EXEC, "/usr/local/bin/battery"),
+    (Calculator, EXEC, xcalc),
+    (
+      "Window Properties",
+      SHEXEC,
+      "xprop | xmessage -center -title 'xprop' -file -"
+    ),
+    ("Font Chooser", EXEC, xfontsel),
+    (Magnify, EXEC, wmagnify),
+    (Colormap, EXEC, xcmap),
+    ("Kill X Application", SHORTCUT, "Mod1+k", EXEC, xkill)
+  ),
+  (
+    Selection,
+    (Copy, SHEXEC, "echo '%s' | wxcopy"),
+    ("Mail To", EXEC, "xterm -name mail -T Pine -e pine %s"),
+    (Navigate, EXEC, "mozilla %s"),
+    ("Search in Manual", EXEC, "MANUAL_SEARCH(%s)")
+  ),
+  (
+    Commands,
+    ("Hide Others", HIDE_OTHERS),
+    ("Show All", SHOW_ALL),
+    ("Arrange Icons", ARRANGE_ICONS),
+    (Refresh, REFRESH),
+    (Lock, SHORTCUT, "Mod1+l", EXEC, "xsecurelock")
+  ),
+  (
+    Appearance,
+    (
+      Themes,
+      OPEN_MENU,
+      "-noext #wmdatadir#/Themes $HOME/GNUstep/Library/WindowMaker/Themes WITH setstyle"
+    ),
+    (
+      Styles,
+      OPEN_MENU,
+      "-noext #wmdatadir#/Styles $HOME/GNUstep/Library/WindowMaker/Styles WITH setstyle"
+    ),
+    (
+      "Icon Sets",
+      OPEN_MENU,
+      "-noext #wmdatadir#/IconSets $HOME/GNUstep/Library/WindowMaker/IconSets WITH seticons"
+    ),
+    (
+      Background,
+      (
+        Solid,
+        (Black, EXEC, "wdwrite WindowMaker WorkspaceBack '(solid, black)'"),
+        (
+          Blue,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#505075\")'"
+        ),
+        (
+          Indigo,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#243e6c\")'"
+        ),
+        (
+          Bluemarine,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#224477\")'"
+        ),
+        (
+          Purple,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#554466\")'"
+        ),
+        (
+          Wheat,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, wheat4)'"
+        ),
+        (
+          "Dark Gray",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#333340\")'"
+        ),
+        (
+          Wine,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(solid, \"#400020\")'"
+        )
+      ),
+      (
+        Gradient,
+        (
+          Sunset,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(mvgradient, deepskyblue4, black, deepskyblue4, tomato4)'"
+        ),
+        (
+          Sky,
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, blue4, white)'"
+        ),
+        (
+          "Blue Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#7080a5\", \"#101020\")'"
+        ),
+        (
+          "Indigo Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#746ebc\", \"#242e4c\")'"
+        ),
+        (
+          "Purple Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#654c66\", \"#151426\")'"
+        ),
+        (
+          "Wheat Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#a09060\", \"#302010\")'"
+        ),
+        (
+          "Grey Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#636380\", \"#131318\")'"
+        ),
+        (
+          "Wine Shades",
+          EXEC,
+          "wdwrite WindowMaker WorkspaceBack '(vgradient, \"#600040\", \"#180010\")'"
+        )
+      ),
+      (
+        Images,
+        OPEN_MENU,
+        "-noext #wmdatadir#/Backgrounds $HOME/GNUstep/Library/WindowMaker/Backgrounds WITH wmsetbg -u -t"
+      )
+    ),
+    (
+      "Save Theme",
+      SHEXEC,
+      "getstyle -t $HOME/GNUstep/Library/WindowMaker/Themes/\"%a(Theme name)\""
+    ),
+    (
+      "Save IconSet",
+      SHEXEC,
+      "geticonset $HOME/GNUstep/Library/WindowMaker/IconSets/\"%a(IconSet name)\""
+    ),
+    (
+      "Preferences Utility",
+      EXEC,
+      "/usr/local/GNUstep/Applications/WPrefs.app/WPrefs"
+    )
+  ),
+  (
+    Session,
+    ("Save Session", SAVE_SESSION),
+    ("Clear Session", CLEAR_SESSION),
+    ("Restart Window Maker", SHORTCUT, "Mod1+r", RESTART),
+    ("Start BlackBox", RESTART, blackbox),
+    ("Start IceWM", RESTART, icewm),
+    (Exit, EXIT)
+  )
+)
