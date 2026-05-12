@@ -1,0 +1,38 @@
+#!/bin/bash
+
+FILENAME=$(/usr/bin/mktemp /tmp/screenshot_XXXXXX.png)
+FILEDEST=""
+IMPORT_ARG=""
+XCLIP_ARG=""
+
+while getopts ":cfh" opt ; do
+    case $opt in
+        c)
+            XCLIP_ARG="-target image/png"
+            FILEDEST="CLIPBOARD"
+            ;;
+        f)
+            IMPORT_ARG="-window root"
+            ;;
+        h)
+            echo
+            echo "Usage: screenshot [-cfh]"
+            echo
+            echo "-c : copy image into clipboard"
+            echo "-f : full screen capture"
+            echo "-h : display this help message"
+            echo
+            exit 1
+            ;;
+    esac
+done
+
+/usr/bin/import $IMPORT_ARG $FILENAME
+/usr/bin/xclip -selection clipboard $XCLIP_ARG -i $FILENAME
+
+if [ "x$FILEDEST" == "xCLIPBOARD" ] ; then
+    rm -f $FILENAME
+    /usr/bin/notify-send -h string:a:a "📸 Captured selection to clipboard"
+else
+    /usr/bin/notify-send -h string:a:a "📸 Capture saved as $FILENAME"
+fi

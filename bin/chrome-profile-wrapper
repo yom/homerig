@@ -1,0 +1,2 @@
+#!/bin/bash
+sudo -u yom DISPLAY="${DISPLAY:-:0}" XAUTHORITY="/home/yom/.Xauthority" /usr/bin/google-chrome --profile-directory=Default --no-sandbox "$1" &

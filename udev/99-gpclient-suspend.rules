@@ -1,0 +1,27 @@
+# Udev rule to stop gpclient (GlobalProtect VPN client) on various power events
+# This ensures VPN connections are properly closed before sleep/suspend to prevent connection issues
+
+# Lid close events (ACPI button/lid)
+ACTION=="button", SUBSYSTEM=="acpi", KERNEL=="button/lid/*", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
+
+# System suspend/sleep events
+ACTION=="add", SUBSYSTEM=="power", KERNEL=="mem", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
+
+# Hibernate events
+ACTION=="add", SUBSYSTEM=="power", KERNEL=="disk", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
+
+# Power button events (in case user initiates shutdown/suspend via power button)
+ACTION=="button", SUBSYSTEM=="acpi", KERNEL=="button/power/*", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
+
+# Network interface going down (backup trigger for network disconnection)
+ACTION=="remove", SUBSYSTEM=="net", KERNEL=="wl*", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
+
+# Battery critical level (emergency shutdown preparation)
+ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="BAT*", \
+    ATTR{status}=="Not charging", ATTR{capacity}=="[0-5]", \
+    RUN+="/bin/bash -c 'pkill -f gpclient'"
