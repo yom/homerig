@@ -1,0 +1,17 @@
+# Machine-specific config (may contain sensitive values)
+local.env
+
+# WindowMaker runtime state
+wmaker/Defaults/WMState
+wmaker/Defaults/WMState.*
+wmaker/Defaults/.*.swp
+wmaker/Library/WindowMaker/CachedPixmaps/
+wmaker/Library/WindowMaker/.fonts_converted
+
+# Compiled binaries
+padlock-xosd
+vpn-widget
+*.o
+
+# OS cruft
+.DS_Store
