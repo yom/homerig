@@ -7,6 +7,11 @@ if [[ ! -f "$LOCAL_ENV" ]]; then
 fi
 source "$LOCAL_ENV"
 
+if [[ -z "${VPN_GATEWAY:-}" || -z "${VPN_GROUP:-}" ]]; then
+    notify-send -i "network-vpn-disconnected" "VPN error" "VPN_GATEWAY or VPN_GROUP not set in $LOCAL_ENV"
+    exit 1
+fi
+
 if pgrep -x "gpclient" > /dev/null; then
     sudo pkill -x "gpclient"
     notify-send -i "network-vpn-disconnected" "VPN disconnected" "🔓"
