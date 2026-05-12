@@ -4,25 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-This is a personal dotfiles repository containing shell configuration files. Currently contains:
-- `.bashrc`: Main bash configuration with PATH setup, shell options, Git prompt integration, and various shell customizations
-
-## AWS Configuration
-
-The .bashrc file includes commented guidance for secure AWS credential configuration using:
-- AWS CLI configuration (`aws configure`)
-- Environment variables  
-- AWS credentials file (~/.aws/credentials)
-- IAM roles for EC2 instances
+Personal dotfiles repository for a Debian/ThinkPad machine running WindowMaker. Contains shell config, daily-use scripts, udev rules, GUI utilities, and WindowMaker configuration.
 
 ## File Structure
 
-- `.bashrc`: Main bash configuration file with:
-  - PATH modifications for local binaries (/home/yom/bin, /home/yom/go/bin, /home/yom/.local/bin)
-  - Git prompt status configuration
-  - Shell history and completion settings
-  - AWS and Go environment variables
+- `bin/` — Daily-use scripts, installed to `/usr/local/bin`
+- `udev/` — udev rules, installed to `/etc/udev/rules.d`
+- `shell/.bashrc` — Main bash config, symlinked to `~/.bashrc`
+- `shell/.xbindkeysrc` — Hardware media/function key bindings, symlinked to `~/.xbindkeysrc`
+- `wmaker/Defaults/WindowMaker` — WindowMaker settings and keybindings
+- `wmaker/Defaults/WMRootMenu` — Root menu and application shortcuts (all keybindings using Mod1+key)
+- `wmaker/Library/WindowMaker/autostart` — Session startup commands (xset, xss-lock)
+- `local.env.example` — Template for `~/.config/dotfiles/local.env` (machine-specific values, not tracked)
+- `install.sh` — Setup script: run once after cloning
+
+## Setup
+
+```bash
+./install.sh
+# Then follow the printed sudo instructions
+```
+
+## Sensitive Values
+
+The `bin/vpn` script reads `VPN_GATEWAY` and `VPN_GROUP` from `~/.config/dotfiles/local.env`. That file is gitignored. `local.env.example` is the template.
 
 ## No Build/Test Commands
 
-This repository contains configuration files only - no build, test, or lint commands are applicable.
+This repository contains configuration files and shell scripts — no build, test, or lint commands are applicable.
