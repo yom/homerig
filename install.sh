@@ -1,0 +1,131 @@
+#!/bin/bash
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORCE="${1:-}"
+
+info()  { echo "[info]  $*"; }
+warn()  { echo "[warn]  $*"; }
+done_() { echo "[done]  $*"; }
+
+# ── Step 1: Check required apt packages ────────────────────────────────────
+info "Checking required packages..."
+
+# Packages required by scripts in bin/:
+#   dunst        → dunstify notifications (battery, brightness, volume, screen-notify, usb-device-notify)
+#   brightnessctl → brightness control
+#   pulseaudio-utils → pactl (volume, usb-device-notify)
+#   usbutils     → lsusb (usb-device-notify)
+#   x11-xserver-utils → xrandr + xset (laptop-dock.sh, screen-notify, autostart)
+#   wmctrl       → window management (laptop-dock.sh)
+#   xbindkeys    → hardware media/function key bindings (.xbindkeysrc)
+#   xss-lock     → screen lock trigger (autostart)
+#   xsecurelock  → screen locker (autostart, WMRootMenu)
+#   python3-pyqt5 → padlock.py
+#   python3-gi + python3-gi-cairo + gir1.2-gtk-3.0 → padlock-gtk.py
+APT_PACKAGES=(
+    dunst
+    brightnessctl
+    pulseaudio-utils
+    usbutils
+    x11-xserver-utils
+    wmctrl
+    xbindkeys
+    xss-lock
+    xsecurelock
+    python3-pyqt5
+    python3-gi
+    python3-gi-cairo
+    "gir1.2-gtk-3.0"
+)
+
+MISSING=()
+for pkg in "${APT_PACKAGES[@]}"; do
+    if ! dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+        MISSING+=("$pkg")
+    fi
+done
+
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    done_ "All required apt packages are installed."
+else
+    warn "Missing packages: ${MISSING[*]}"
+fi
+
+# ── Step 2: Shell config ────────────────────────────────────────────────────
+info "Setting up shell config..."
+
+for dotfile in .bashrc .xbindkeysrc; do
+    src="$REPO_DIR/shell/$dotfile"
+    dst="$HOME/$dotfile"
+    if [[ -f "$dst" && ! -L "$dst" ]]; then
+        cp "$dst" "${dst}.bak"
+        warn "Backed up $dst to ${dst}.bak"
+    fi
+    if [[ -L "$dst" && "$FORCE" != "--force" ]]; then
+        warn "$dst is already a symlink. Skipping. Use --force to overwrite."
+    else
+        ln -sf "$src" "$dst"
+        done_ "$dst → $src"
+    fi
+done
+
+# ── Step 3: WindowMaker config ──────────────────────────────────────────────
+info "Setting up WindowMaker config..."
+
+mkdir -p "$HOME/GNUstep/Defaults" "$HOME/GNUstep/Library/WindowMaker"
+
+for src in \
+    "wmaker/Defaults/WindowMaker:$HOME/GNUstep/Defaults/WindowMaker" \
+    "wmaker/Defaults/WMRootMenu:$HOME/GNUstep/Defaults/WMRootMenu" \
+    "wmaker/Library/WindowMaker/autostart:$HOME/GNUstep/Library/WindowMaker/autostart"
+do
+    rel="${src%%:*}"
+    dst="${src##*:}"
+    if [[ -f "$dst" && "$FORCE" != "--force" ]]; then
+        warn "$dst already exists. Skipping. Use --force to overwrite."
+    else
+        cp "$REPO_DIR/$rel" "$dst"
+        done_ "Installed $dst"
+    fi
+done
+
+# ── Step 4: Local config ────────────────────────────────────────────────────
+info "Setting up local config..."
+
+mkdir -p "$HOME/.config/dotfiles"
+
+if [[ -f "$HOME/.config/dotfiles/local.env" ]]; then
+    warn "~/.config/dotfiles/local.env already exists. Skipping."
+else
+    cp "$REPO_DIR/local.env.example" "$HOME/.config/dotfiles/local.env"
+    done_ "Created ~/.config/dotfiles/local.env from template"
+    warn "→ Edit ~/.config/dotfiles/local.env and set VPN_GATEWAY and VPN_GROUP."
+fi
+
+# ── Step 5: Print sudo instructions ────────────────────────────────────────
+echo ""
+echo "══════════════════════════════════════════════════════════"
+echo "  Manual steps required (run these yourself with sudo):"
+echo "══════════════════════════════════════════════════════════"
+echo ""
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo "  # Install missing apt packages:"
+    echo "  sudo apt install ${MISSING[*]}"
+    echo ""
+fi
+
+echo "  # gpclient (GlobalProtect VPN — not in apt):"
+echo "  #   Download the .deb from https://github.com/yuezk/GlobalProtect-openconnect/releases"
+echo "  #   sudo dpkg -i globalprotect-openconnect_*.deb"
+echo ""
+echo "  # Install scripts to /usr/local/bin:"
+echo "  sudo cp $REPO_DIR/bin/* /usr/local/bin/"
+echo "  sudo chmod +x $(ls "$REPO_DIR/bin/" | sed "s|^|/usr/local/bin/|" | tr '\n' ' ')"
+echo ""
+echo "  # Install udev rules:"
+echo "  sudo cp $REPO_DIR/udev/*.rules /etc/udev/rules.d/"
+echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
+echo ""
+echo "══════════════════════════════════════════════════════════"
