@@ -2,21 +2,21 @@
 
 LOCAL_ENV="$HOME/.config/dotfiles/local.env"
 if [[ ! -f "$LOCAL_ENV" ]]; then
-    notify-send -i "network-vpn-disconnected" "VPN error" "Missing $LOCAL_ENV"
+    dunstify -i "network-vpn-disconnected" "VPN error" "Missing $LOCAL_ENV"
     exit 1
 fi
 source "$LOCAL_ENV"
 
 if [[ -z "${VPN_GATEWAY:-}" || -z "${VPN_GROUP:-}" ]]; then
-    notify-send -i "network-vpn-disconnected" "VPN error" "VPN_GATEWAY or VPN_GROUP not set in $LOCAL_ENV"
+    dunstify -i "network-vpn-disconnected" "VPN error" "VPN_GATEWAY or VPN_GROUP not set in $LOCAL_ENV"
     exit 1
 fi
 
 if pgrep -x "gpclient" > /dev/null; then
     sudo pkill -x "gpclient"
-    notify-send -i "network-vpn-disconnected" "VPN disconnected" "🔓"
+    dunstify -i "network-vpn-disconnected" "VPN disconnected" "🔓"
 else
     sudo gpclient connect "$VPN_GATEWAY" -g "$VPN_GROUP" --reconnect-timeout 10 \
         --browser '/usr/local/bin/chrome-profile-wrapper' &
-    notify-send -i "network-vpn" "VPN connected" "🔒"
+    dunstify -i "network-vpn" "VPN connected" "🔒"
 fi

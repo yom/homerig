@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+import os
+import re
+import signal
+import subprocess
+import sys
+from PIL import Image
+import Xlib.display
+import Xlib.X
+
+WALLPAPER = "/home/yom/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg"
+TILE_H = 32  # stay under X11 request size limit per put_image call
+
+def get_monitors():
+    out = subprocess.check_output(["xrandr", "--query"], text=True)
+    monitors = []
+    for m in re.finditer(r"\d+x\d+\+\d+\+\d+", out):
+        res = m.group()
+        w, h, x, y = map(int, re.split(r"[x+]", res))
+        monitors.append((w, h, x, y))
+    return monitors
+
+def blit_image(pixmap, gc, img, offset_x, offset_y, depth):
+    w, h = img.size
+    r, g, b = img.split()
+    bgr = Image.merge("RGB", (b, g, r))
+    for y in range(0, h, TILE_H):
+        rows = min(TILE_H, h - y)
+        tile = bgr.crop((0, y, w, y + rows))
+        raw = tile.tobytes()
+        pixels = bytearray()
+        for i in range(0, len(raw), 3):
+            pixels += raw[i:i+3] + b'\x00'
+        pixmap.put_image(gc, offset_x, offset_y + y, w, rows,
+                         Xlib.X.ZPixmap, depth, 0, bytes(pixels))
+
+def main():
+    wid_str = os.environ.get("XSCREENSAVER_WINDOW")
+    if not wid_str:
+        sys.exit("XSCREENSAVER_WINDOW not set")
+
+    wid = int(wid_str, 16) if wid_str.startswith("0x") else int(wid_str)
+
+    dpy = Xlib.display.Display()
+    win = dpy.create_resource_object("window", wid)
+    geom = win.get_geometry()
+    depth = dpy.screen().root_depth
+
+    pixmap = win.create_pixmap(geom.width, geom.height, depth)
+    gc = win.create_gc()
+
+    source = Image.open(WALLPAPER).convert("RGB")
+    for (mw, mh, mx, my) in get_monitors():
+        scaled = source.resize((mw, mh), Image.LANCZOS)
+        blit_image(pixmap, gc, scaled, mx, my, depth)
+
+    win.change_attributes(background_pixmap=pixmap)
+    win.clear_area(x=0, y=0, width=geom.width, height=geom.height)
+    dpy.sync()
+    pixmap.free()
+    gc.free()
+
+    signal.pause()
+
+if __name__ == "__main__":
+    main()

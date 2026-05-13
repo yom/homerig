@@ -95,7 +95,7 @@
     ("Show All", SHOW_ALL),
     ("Arrange Icons", ARRANGE_ICONS),
     (Refresh, REFRESH),
-    (Lock, SHORTCUT, "Mod1+l", EXEC, "xsecurelock")
+    (Lock, SHORTCUT, "Mod1+l", EXEC, "env XSECURELOCK_SAVER=/usr/local/bin/saver-wallpaper xsecurelock")
   ),
   (
     Appearance,
