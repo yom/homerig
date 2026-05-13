@@ -23,6 +23,8 @@ info "Checking required packages..."
 #   xsecurelock  → screen locker (autostart, WMRootMenu)
 #   python3-pyqt5 → padlock.py
 #   python3-gi + python3-gi-cairo + gir1.2-gtk-3.0 → padlock-gtk.py
+#   python3-pil  → saver-wallpaper
+#   python3-xlib → saver-wallpaper
 APT_PACKAGES=(
     dunst
     brightnessctl
@@ -37,6 +39,8 @@ APT_PACKAGES=(
     python3-gi
     python3-gi-cairo
     "gir1.2-gtk-3.0"
+    python3-pil
+    python3-xlib
 )
 
 MISSING=()
