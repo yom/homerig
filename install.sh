@@ -25,6 +25,8 @@ info "Checking required packages..."
 #   python3-gi + python3-gi-cairo + gir1.2-gtk-3.0 → padlock-gtk.py
 #   python3-pil  → saver-wallpaper
 #   python3-xlib → saver-wallpaper
+#   imagemagick  → idesk/make_icons.sh
+#   idesk        → desktop icon manager
 APT_PACKAGES=(
     dunst
     brightnessctl
@@ -41,6 +43,8 @@ APT_PACKAGES=(
     "gir1.2-gtk-3.0"
     python3-pil
     python3-xlib
+    imagemagick
+    idesk
 )
 
 MISSING=()
@@ -107,7 +111,40 @@ else
     warn "→ Edit ~/.config/dotfiles/local.env and set VPN_GATEWAY and VPN_GROUP."
 fi
 
-# ── Step 5: Print sudo instructions ────────────────────────────────────────
+# ── Step 5: iDesk setup ─────────────────────────────────────────────────────
+info "Setting up iDesk..."
+
+mkdir -p "$HOME/.idesktop"
+bash "$REPO_DIR/idesk/make_icons.sh"
+
+if pgrep -x gpclient > /dev/null 2>&1; then
+    ln -sf "$HOME/.idesktop/vpn-on.png" "$HOME/.idesktop/vpn-current.png"
+else
+    ln -sf "$HOME/.idesktop/vpn-off.png" "$HOME/.idesktop/vpn-current.png"
+fi
+done_ "Set ~/.idesktop/vpn-current.png"
+
+vpn_lnk_dst="$HOME/.idesktop/vpn.lnk"
+if [[ -f "$vpn_lnk_dst" && "$FORCE" != "--force" ]]; then
+    warn "$vpn_lnk_dst already exists. Skipping. Use --force to overwrite."
+else
+    sed "s|/home/yom|$HOME|g" "$REPO_DIR/idesk/vpn.lnk" > "$vpn_lnk_dst"
+    done_ "Installed $vpn_lnk_dst"
+fi
+
+ideskrc_dst="$HOME/.ideskrc"
+if [[ -f "$ideskrc_dst" && ! -L "$ideskrc_dst" && "$FORCE" != "--force" ]]; then
+    cp "$ideskrc_dst" "${ideskrc_dst}.bak"
+    warn "Backed up $ideskrc_dst to ${ideskrc_dst}.bak"
+fi
+if [[ -f "$ideskrc_dst" && "$FORCE" != "--force" ]]; then
+    warn "$ideskrc_dst already exists. Skipping. Use --force to overwrite."
+else
+    cp "$REPO_DIR/idesk/dot.ideskrc" "$ideskrc_dst"
+    done_ "Installed $ideskrc_dst"
+fi
+
+# ── Step 6: Print sudo instructions ────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════════"
 echo "  Manual steps required (run these yourself with sudo):"

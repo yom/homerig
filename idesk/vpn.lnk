@@ -1,0 +1,9 @@
+table Icon
+  Caption: VPN
+  Icon: /home/yom/.idesktop/vpn-current.png
+  Width: 48
+  Height: 48
+  X: 1852
+  Y: 1132
+  Command[0]: /usr/local/bin/vpn
+end
