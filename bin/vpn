@@ -2,8 +2,8 @@
 
 _update_idesk_icon() {
     ln -sf "$HOME/.idesktop/$1" "$HOME/.idesktop/vpn-current.png"
-    if pgrep -x idesk > /dev/null; then
-        pkill -x idesk || true
+    if /usr/bin/pgrep -x idesk > /dev/null; then
+        /usr/bin/pkill -x idesk || true
         sleep 0.1
         /usr/bin/idesk &
     fi
@@ -21,7 +21,7 @@ if [[ -z "${VPN_GATEWAY:-}" || -z "${VPN_GROUP:-}" ]]; then
     exit 1
 fi
 
-if pgrep -x "gpclient" > /dev/null; then
+if /usr/bin/pgrep -x "gpclient" > /dev/null; then
     sudo gpclient disconnect
     _update_idesk_icon vpn-off.png
     dunstify -i "network-vpn-disconnected" "VPN disconnected" "🔓"
