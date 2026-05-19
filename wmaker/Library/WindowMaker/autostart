@@ -10,4 +10,4 @@ if pgrep -x gpclient > /dev/null; then
 else
     ln -sf "$HOME/.idesktop/vpn-off.png" "$HOME/.idesktop/vpn-current.png"
 fi
-idesk &
+/usr/bin/idesk &

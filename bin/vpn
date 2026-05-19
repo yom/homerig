@@ -5,7 +5,7 @@ _update_idesk_icon() {
     if pgrep -x idesk > /dev/null; then
         pkill -x idesk || true
         sleep 0.1
-        idesk &
+        /usr/bin/idesk &
     fi
 }
 
