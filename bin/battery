@@ -175,46 +175,59 @@ determine_battery_icon() {
     local state="$1"
     local ac_online="$2"
     local capacity="$3"
-    local base_icon icon
+    local icon_path
 
-    # Determine base icon based on charge level
-    if [[ $capacity -ge $FULL_THRESHOLD ]]; then
-        base_icon="battery-full"
-    elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
-        base_icon="battery-good"
-    elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
-        base_icon="battery-low"
-    elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
-        base_icon="battery-caution"
-    else
-        base_icon="battery-empty"
-    fi
-
-    log_debug "Base icon for $capacity%: $base_icon"
-
-    # Determine final icon based on battery state and AC adapter status
+    # Use Paper theme battery icons with full paths
     case "x$state" in
         "xCharging")
-            icon="${base_icon}-charging"
+            if [[ $capacity -ge $FULL_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-full-charging.png"
+            elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-good-charging.png"
+            elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-medium-charging.png"
+            elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-low-charging.png"
+            else
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-empty-charging.png"
+            fi
             ;;
         "xNot charging"|"xFull")
             # AC connected but battery not charging (likely full)
             if [[ "$ac_online" == "1" ]]; then
-                icon="battery-full-charged"
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
             else
-                icon="$base_icon"
+                if [[ $capacity -ge $FULL_THRESHOLD ]]; then
+                    icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
+                elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
+                    icon_path="/usr/share/icons/Paper/48x48/status/battery-good.png"
+                elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
+                    icon_path="/usr/share/icons/Paper/48x48/status/battery-medium.png"
+                elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
+                    icon_path="/usr/share/icons/Paper/48x48/status/battery-low.png"
+                else
+                    icon_path="/usr/share/icons/Paper/48x48/status/battery-empty.png"
+                fi
             fi
             ;;
-        "xDischarging")
-            icon="$base_icon"
-            ;;
-        *)
-            icon="$base_icon"
+        "xDischarging"|*)
+            # Battery discharging or unknown state
+            if [[ $capacity -ge $FULL_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
+            elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-good.png"
+            elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-medium.png"
+            elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-caution.png"
+            else
+                icon_path="/usr/share/icons/Paper/48x48/status/battery-empty.png"
+            fi
             ;;
     esac
 
-    log_debug "Final icon: $icon"
-    echo "$icon"
+    log_debug "Final icon: $icon_path"
+    echo "$icon_path"
 }
 
 show_battery_notification() {
