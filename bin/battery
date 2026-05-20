@@ -5,7 +5,8 @@
 # DESCRIPTION:
 #   Displays desktop notifications for battery status changes including charge level,
 #   AC adapter connection/disconnection, and charging status. Automatically detects
-#   the active X11 user session when run from udev as root.
+#   the active X11 user session when run from udev as root. Flashes keyboard backlight
+#   briefly when AC adapter is plugged in as a visual status indicator.
 #
 # USAGE:
 #   battery [OPTIONS]
@@ -17,6 +18,7 @@
 # DEPENDENCIES:
 #   - dunstify: Desktop notifications (dunst)
 #   - acpi: Battery information display
+#   - brightnessctl: Keyboard backlight control (optional)
 #   - Access to /sys/class/power_supply/
 #
 # AUTHOR:
@@ -29,6 +31,9 @@ readonly NOTIFICATION_ID="${NOTIFICATION_ID:-600}"
 readonly NOTIFICATION_TIMEOUT="${NOTIFICATION_TIMEOUT:-5000}"
 readonly BATTERY_DEVICE="${BATTERY_DEVICE:-BAT0}"
 readonly AC_DEVICE="${AC_DEVICE:-AC}"
+readonly KBD_BACKLIGHT_DEVICE="${KBD_BACKLIGHT_DEVICE:-tpacpi::kbd_backlight}"
+readonly KBD_FLASH_DURATION="${KBD_FLASH_DURATION:-0.5}"
+readonly AC_STATE_FILE="/tmp/battery-ac-state-$(whoami)"
 
 # Battery charge level thresholds (percentages)
 readonly FULL_THRESHOLD="${FULL_THRESHOLD:-80}"
@@ -57,6 +62,64 @@ log_debug() {
 
 log_error() {
     echo "[ERROR] $*" >&2
+}
+
+# Flash keyboard backlight to indicate AC plug-in
+flash_keyboard_backlight() {
+    log_debug "Flashing keyboard backlight to indicate AC plug-in"
+
+    if ! command -v brightnessctl >/dev/null 2>&1; then
+        log_debug "brightnessctl not found, skipping keyboard backlight flash"
+        return 0
+    fi
+
+    if ! brightnessctl --device "$KBD_BACKLIGHT_DEVICE" info >/dev/null 2>&1; then
+        log_debug "Keyboard backlight device $KBD_BACKLIGHT_DEVICE not found, skipping flash"
+        return 0
+    fi
+
+    local current_level
+    current_level=$(brightnessctl --device "$KBD_BACKLIGHT_DEVICE" get 2>/dev/null || echo "0")
+    log_debug "Current keyboard backlight level: $current_level"
+
+    sudo brightnessctl --device "$KBD_BACKLIGHT_DEVICE" set 2 >/dev/null 2>&1
+    sleep "$KBD_FLASH_DURATION"
+    sudo brightnessctl --device "$KBD_BACKLIGHT_DEVICE" set "$current_level" >/dev/null 2>&1
+
+    log_debug "Keyboard backlight flash completed"
+}
+
+# Get previous AC adapter state from state file
+get_previous_ac_state() {
+    if [[ -f "$AC_STATE_FILE" ]]; then
+        cat "$AC_STATE_FILE" 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+# Save current AC adapter state to state file
+save_ac_state() {
+    local ac_state="$1"
+    echo "$ac_state" > "$AC_STATE_FILE" 2>/dev/null
+    log_debug "Saved AC state: $ac_state"
+}
+
+# Check if AC adapter was just plugged in
+detect_ac_plug_in() {
+    local current_ac_state="$1"
+    local previous_ac_state
+
+    previous_ac_state=$(get_previous_ac_state)
+    log_debug "Previous AC state: $previous_ac_state, Current AC state: $current_ac_state"
+
+    if [[ "$previous_ac_state" == "0" && "$current_ac_state" == "1" ]]; then
+        log_debug "AC adapter plug-in detected"
+        return 0
+    else
+        log_debug "No AC plug-in event detected"
+        return 1
+    fi
 }
 
 # Check if required commands are available
@@ -284,6 +347,12 @@ main() {
     local temp="${battery_info#*|}"
     local ac_status="${temp%%|*}"
     local capacity="${temp#*|}"
+
+    if detect_ac_plug_in "$ac_status"; then
+        flash_keyboard_backlight &
+    fi
+
+    save_ac_state "$ac_status"
 
     # Determine appropriate icon
     local icon
