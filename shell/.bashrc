@@ -43,6 +43,9 @@ export PATH="/sbin:/usr/sbin:${PATH}"
 # Go installs binaries here when using 'go install'
 [ -d /home/yom/go/bin ] && export PATH="/home/yom/go/bin:${PATH}"
 
+# Add cargo binary directory if it exists
+[ -d /home/yom/.cargo/bin ] && export PATH="/home/yom/.cargo/bin:${PATH}"
+
 # Add local Python/pip binary directory if it exists
 # Python packages installed with --user flag place binaries here
 if [ -d /home/yom/.local/bin ] ; then
@@ -58,13 +61,20 @@ export GOPATH=~/go
 # Tool Configuration Variables
 # =============================
 
-# Configure less pager to interpret ANSI color sequences
+# Configure less pager with Solarized colors using modern less color system
 # -R flag allows less to display colored output properly
-export LESS='-R'
+# --use-color enables the modern color system
+export LESS='-R --use-color'
 
 # Set up lessfilter for enhanced file viewing in less
 # This allows less to display syntax highlighting and formatted content
 export LESSOPEN='|~/.lessfilter %s'
+
+# Solarized color scheme for less using your actual Xresources color mapping
+# Based on your URxvt color definitions:
+# color10=base01(#586e75), color11=base00(#657b83), color12=base0(#839496)
+# color1=red(#dc322f), color2=green(#859900), color4=blue(#268bd2), color9=orange(#cb4b16)
+export LESS="$LESS -Dd11.-1 -Du2.-1 -Ds4.-1 -DB9.-1 -DE1.-1 -DN12.-1"
 
 # =============================================================================
 # 3. HISTORY MANAGEMENT
