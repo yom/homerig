@@ -1,31 +1,6 @@
 #!/bin/bash
-#
-# battery - Battery status notification daemon
-#
-# DESCRIPTION:
-#   Displays desktop notifications for battery status changes including charge level,
-#   AC adapter connection/disconnection, and charging status. Automatically detects
-#   the active X11 user session when run from udev as root. Flashes keyboard backlight
-#   briefly when AC adapter is plugged in as a visual status indicator.
-#
-# USAGE:
-#   battery [OPTIONS]
-#
-# OPTIONS:
-#   -h    Show help message
-#   -v    Verbose output for debugging
-#
-# DEPENDENCIES:
-#   - dunstify: Desktop notifications (dunst)
-#   - acpi: Battery information display
-#   - brightnessctl: Keyboard backlight control (optional)
-#   - Access to /sys/class/power_supply/
-#
-# AUTHOR:
-#   Generated for dotfiles repository
-#
+# Battery status notification daemon
 
-# Configuration constants
 readonly DISPLAY_ID="${DISPLAY_ID:-:0}"
 readonly NOTIFICATION_ID="${NOTIFICATION_ID:-600}"
 readonly NOTIFICATION_TIMEOUT="${NOTIFICATION_TIMEOUT:-5000}"
@@ -35,17 +10,13 @@ readonly KBD_BACKLIGHT_DEVICE="${KBD_BACKLIGHT_DEVICE:-tpacpi::kbd_backlight}"
 readonly KBD_FLASH_DURATION="${KBD_FLASH_DURATION:-0.5}"
 readonly AC_STATE_FILE="/tmp/battery-ac-state-$(whoami)"
 
-# Battery charge level thresholds (percentages)
 readonly FULL_THRESHOLD="${FULL_THRESHOLD:-80}"
 readonly GOOD_THRESHOLD="${GOOD_THRESHOLD:-40}"
 readonly LOW_THRESHOLD="${LOW_THRESHOLD:-15}"
 readonly CAUTION_THRESHOLD="${CAUTION_THRESHOLD:-5}"
 
-# Global variables
 VERBOSE=false
 X_USER=""
-
-# === UTILITY FUNCTIONS ===
 
 show_help() {
     echo "Usage: battery [-h] [-v]"
@@ -56,103 +27,36 @@ show_help() {
     exit 0
 }
 
-log_debug() {
-    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] $*" >&2
-}
+log_debug() { [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] $*" >&2; }
+log_error() { echo "[ERROR] $*" >&2; }
 
-log_error() {
-    echo "[ERROR] $*" >&2
-}
-
-# Flash keyboard backlight to indicate AC plug-in
 flash_keyboard_backlight() {
-    log_debug "Flashing keyboard backlight to indicate AC plug-in"
-
-    if ! command -v brightnessctl >/dev/null 2>&1; then
-        log_debug "brightnessctl not found, skipping keyboard backlight flash"
-        return 0
-    fi
-
-    if ! brightnessctl --device "$KBD_BACKLIGHT_DEVICE" info >/dev/null 2>&1; then
-        log_debug "Keyboard backlight device $KBD_BACKLIGHT_DEVICE not found, skipping flash"
-        return 0
-    fi
+    command -v brightnessctl >/dev/null 2>&1 || return 0
+    brightnessctl --device "$KBD_BACKLIGHT_DEVICE" info >/dev/null 2>&1 || return 0
 
     local current_level
     current_level=$(brightnessctl --device "$KBD_BACKLIGHT_DEVICE" get 2>/dev/null || echo "0")
-    log_debug "Current keyboard backlight level: $current_level"
-
     sudo brightnessctl --device "$KBD_BACKLIGHT_DEVICE" set 2 >/dev/null 2>&1
     sleep "$KBD_FLASH_DURATION"
     sudo brightnessctl --device "$KBD_BACKLIGHT_DEVICE" set "$current_level" >/dev/null 2>&1
-
-    log_debug "Keyboard backlight flash completed"
 }
 
-# Get previous AC adapter state from state file
-get_previous_ac_state() {
-    if [[ -f "$AC_STATE_FILE" ]]; then
-        cat "$AC_STATE_FILE" 2>/dev/null || echo "unknown"
-    else
-        echo "unknown"
-    fi
-}
-
-# Save current AC adapter state to state file
-save_ac_state() {
-    local ac_state="$1"
-    echo "$ac_state" > "$AC_STATE_FILE" 2>/dev/null
-    log_debug "Saved AC state: $ac_state"
-}
-
-# Check if AC adapter was just plugged in
-detect_ac_plug_in() {
-    local current_ac_state="$1"
-    local previous_ac_state
-
-    previous_ac_state=$(get_previous_ac_state)
-    log_debug "Previous AC state: $previous_ac_state, Current AC state: $current_ac_state"
-
-    if [[ "$previous_ac_state" == "0" && "$current_ac_state" == "1" ]]; then
-        log_debug "AC adapter plug-in detected"
-        return 0
-    else
-        log_debug "No AC plug-in event detected"
-        return 1
-    fi
-}
-
-# Check if required commands are available
 check_dependencies() {
     local missing=()
-    local required_commands=("dunstify" "acpi")
-
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            missing+=("$cmd")
-        fi
+    for cmd in dunstify acpi; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
-
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing required dependencies: ${missing[*]}"
         exit 1
     fi
-
-    # Check if battery and AC devices exist
     if [[ ! -d "/sys/class/power_supply/$BATTERY_DEVICE" ]]; then
-        log_error "Battery device $BATTERY_DEVICE not found"
-        exit 1
+        log_error "Battery device $BATTERY_DEVICE not found"; exit 1
     fi
-
     if [[ ! -d "/sys/class/power_supply/$AC_DEVICE" ]]; then
-        log_error "AC adapter device $AC_DEVICE not found"
-        exit 1
+        log_error "AC adapter device $AC_DEVICE not found"; exit 1
     fi
-
-    log_debug "Dependency check completed successfully"
 }
-
-# === USER SESSION DETECTION ===
 
 detect_x_user() {
     if [[ "$(whoami)" != "root" ]]; then
@@ -163,34 +67,22 @@ detect_x_user() {
     fi
 
     log_debug "Running as root, detecting X11 user session"
-
-    # Method 1: Check who owns the X server process
     X_USER=$(ps -eo user,comm 2>/dev/null | grep -E '(Xorg|X)$' | head -1 | awk '{print $1}' 2>/dev/null)
-    log_debug "Method 1 (X server process): X_USER='$X_USER'"
 
-    # Method 2: Check for active loginctl sessions if method 1 fails
     if [[ -z "$X_USER" || "$X_USER" == "root" ]]; then
         X_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | grep -v root | head -1 2>/dev/null)
-        log_debug "Method 2 (loginctl sessions): X_USER='$X_USER'"
     fi
-
-    # Method 3: Fallback to checking process ownership of common desktop processes
     if [[ -z "$X_USER" ]]; then
         X_USER=$(ps -eo user,comm 2>/dev/null | grep -E '(gnome-session|kde|xfce|wmaker)' | head -1 | awk '{print $1}' 2>/dev/null)
-        log_debug "Method 3 (desktop processes): X_USER='$X_USER'"
     fi
-
-    # Method 4: Final fallback - use the user who owns /tmp/.X11-unix/X0
     if [[ -z "$X_USER" && -S /tmp/.X11-unix/X0 ]]; then
         X_USER=$(stat -c %U /tmp/.X11-unix/X0 2>/dev/null)
-        log_debug "Method 4 (X11 socket): X_USER='$X_USER'"
     fi
 
     if [[ -n "$X_USER" && "$X_USER" != "root" ]]; then
         export DISPLAY="$DISPLAY_ID"
         export XAUTHORITY="/home/$X_USER/.Xauthority"
         log_debug "Detected X11 session for user: $X_USER"
-        return 0
     else
         log_error "No active X11 session found, exiting silently"
         exit 0
@@ -199,148 +91,71 @@ detect_x_user() {
 
 run_as_x_user() {
     if [[ "$(whoami)" == "root" && -n "$X_USER" && "$X_USER" != "root" ]]; then
-        log_debug "Running command as user '$X_USER': $*"
         su - "$X_USER" -c "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY $(printf '%q ' "$@")" 2>/dev/null
     else
-        log_debug "Running command as current user: $*"
         "$@" 2>/dev/null
     fi
 }
 
-# === BATTERY STATUS FUNCTIONS ===
-
 get_battery_info() {
     local battery_status ac_status capacity
-
-    # Read battery information
-    if ! battery_status=$(cat "/sys/class/power_supply/$BATTERY_DEVICE/status" 2>/dev/null); then
-        log_error "Failed to read battery status"
-        exit 1
-    fi
-
-    if ! ac_status=$(cat "/sys/class/power_supply/$AC_DEVICE/online" 2>/dev/null); then
-        log_error "Failed to read AC adapter status"
-        exit 1
-    fi
-
-    if ! capacity=$(cat "/sys/class/power_supply/$BATTERY_DEVICE/capacity" 2>/dev/null); then
-        log_error "Failed to read battery capacity"
-        exit 1
-    fi
-
-    log_debug "Battery status: $battery_status, AC online: $ac_status, Capacity: $capacity%"
-
-    # Use a delimiter to separate values properly (handles multi-word battery status)
+    battery_status=$(cat "/sys/class/power_supply/$BATTERY_DEVICE/status" 2>/dev/null) \
+        || { log_error "Failed to read battery status"; exit 1; }
+    ac_status=$(cat "/sys/class/power_supply/$AC_DEVICE/online" 2>/dev/null) \
+        || { log_error "Failed to read AC adapter status"; exit 1; }
+    capacity=$(cat "/sys/class/power_supply/$BATTERY_DEVICE/capacity" 2>/dev/null) \
+        || { log_error "Failed to read battery capacity"; exit 1; }
+    log_debug "Battery: $battery_status, AC: $ac_status, Capacity: $capacity%"
     echo "${battery_status}|${ac_status}|${capacity}"
 }
 
 determine_battery_icon() {
-    local state="$1"
-    local ac_online="$2"
-    local capacity="$3"
-    local icon_path
+    local state="$1" ac_online="$2" capacity="$3"
+    local base="/usr/share/icons/Paper/48x48/status/battery"
+    local level suffix=""
 
-    # Use Paper theme battery icons with full paths
+    if [[ $capacity -ge $FULL_THRESHOLD ]];      then level="full"
+    elif [[ $capacity -ge $GOOD_THRESHOLD ]];    then level="good"
+    elif [[ $capacity -ge $LOW_THRESHOLD ]];     then level="medium"
+    elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then level="low"
+    else                                              level="empty"
+    fi
+
     case "x$state" in
-        "xCharging")
-            if [[ $capacity -ge $FULL_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-full-charging.png"
-            elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-good-charging.png"
-            elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-medium-charging.png"
-            elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-low-charging.png"
-            else
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-empty-charging.png"
-            fi
-            ;;
-        "xNot charging"|"xFull")
-            # AC connected but battery not charging (likely full)
-            if [[ "$ac_online" == "1" ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
-            else
-                if [[ $capacity -ge $FULL_THRESHOLD ]]; then
-                    icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
-                elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
-                    icon_path="/usr/share/icons/Paper/48x48/status/battery-good.png"
-                elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
-                    icon_path="/usr/share/icons/Paper/48x48/status/battery-medium.png"
-                elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
-                    icon_path="/usr/share/icons/Paper/48x48/status/battery-low.png"
-                else
-                    icon_path="/usr/share/icons/Paper/48x48/status/battery-empty.png"
-                fi
-            fi
-            ;;
-        "xDischarging"|*)
-            # Battery discharging or unknown state
-            if [[ $capacity -ge $FULL_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-full.png"
-            elif [[ $capacity -ge $GOOD_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-good.png"
-            elif [[ $capacity -ge $LOW_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-medium.png"
-            elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-caution.png"
-            else
-                icon_path="/usr/share/icons/Paper/48x48/status/battery-empty.png"
-            fi
-            ;;
+        xCharging)
+            suffix="-charging" ;;
+        "xNot charging"|xFull)
+            [[ "$ac_online" == "1" ]] && level="full" ;;
+        xDischarging|*)
+            [[ $capacity -ge $CAUTION_THRESHOLD && $capacity -lt $LOW_THRESHOLD ]] && level="caution" ;;
     esac
 
-    log_debug "Final icon: $icon_path"
-    echo "$icon_path"
+    log_debug "Icon: ${base}-${level}${suffix}.png"
+    echo "${base}-${level}${suffix}.png"
 }
 
 show_battery_notification() {
-    local icon="$1"
-    local battery_info
-
-    # Get battery information from acpi command
-    if ! battery_info=$(/usr/bin/acpi 2>/dev/null); then
-        log_error "Failed to get battery information from acpi"
-        battery_info="Battery status unavailable"
-    fi
-
-    log_debug "Showing notification with icon: $icon"
-    log_debug "Battery info: $battery_info"
-
+    local icon="$1" battery_info
+    battery_info=$(/usr/bin/acpi 2>/dev/null) || battery_info="Battery status unavailable"
     run_as_x_user dunstify -r "$NOTIFICATION_ID" -i "$icon" \
         -h string:x-canonical-private-synchronous:battery \
         -t "$NOTIFICATION_TIMEOUT" \
         "$battery_info"
 }
 
-# === MAIN EXECUTION ===
-
 main() {
-    # Parse command line options
     while getopts ":hv" opt; do
         case ${opt} in
-            h)
-                show_help
-                ;;
-            v)
-                VERBOSE=true
-                ;;
-            \?)
-                log_error "Invalid option: $OPTARG"
-                exit 1
-                ;;
+            h) show_help ;;
+            v) VERBOSE=true ;;
+            \?) log_error "Invalid option: $OPTARG"; exit 1 ;;
         esac
     done
     shift $((OPTIND -1))
 
-    log_debug "Battery notification script starting"
-
-    # Check dependencies
     check_dependencies
-
-    # Set up X11 environment and detect user session
     detect_x_user
 
-    # Get battery information
     local battery_info
     battery_info=$(get_battery_info)
     local battery_status="${battery_info%%|*}"
@@ -348,24 +163,16 @@ main() {
     local ac_status="${temp%%|*}"
     local capacity="${temp#*|}"
 
-    if detect_ac_plug_in "$ac_status"; then
-        flash_keyboard_backlight &
-    fi
+    local prev_ac="unknown"
+    [[ -f "$AC_STATE_FILE" ]] && prev_ac=$(cat "$AC_STATE_FILE" 2>/dev/null)
+    [[ "$prev_ac" == "0" && "$ac_status" == "1" ]] && flash_keyboard_backlight &
+    echo "$ac_status" > "$AC_STATE_FILE" 2>/dev/null
 
-    save_ac_state "$ac_status"
-
-    # Determine appropriate icon
     local icon
     icon=$(determine_battery_icon "$battery_status" "$ac_status" "$capacity")
-
-    # Show notification
     show_battery_notification "$icon"
-
-    log_debug "Battery notification script completed successfully"
-    exit 0
 }
 
-# Execute main function if script is run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
