@@ -69,14 +69,15 @@ function getVolumeIcon() {
 
     VOLUME=$1
 
+    # Use beautiful Paper theme notification volume icons
     if [ $VOLUME -eq 0 ] ; then
-        echo audio-volume-muted
+        echo "/usr/share/icons/Paper/48x48/notifications/notification-audio-volume-muted.svg"
     elif [ $VOLUME -le 33 ] ; then
-        echo audio-volume-low
+        echo "/usr/share/icons/Paper/48x48/notifications/notification-audio-volume-low.svg"
     elif [ $VOLUME -le 66 ] ; then
-        echo audio-volume-medium
+        echo "/usr/share/icons/Paper/48x48/notifications/notification-audio-volume-medium.svg"
     else
-        echo audio-volume-high
+        echo "/usr/share/icons/Paper/48x48/notifications/notification-audio-volume-high.svg"
     fi
 }
 
