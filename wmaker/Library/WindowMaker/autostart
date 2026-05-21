@@ -1,4 +1,5 @@
 #!/bin/sh
+feh --bg-fill "$HOME/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg"
 xset m 20/10 4
 xset b off # disable system beep
 xset s 300 5 # 5 min idle -> activate lock w/ 5s blank grace
