@@ -14,8 +14,9 @@ import subprocess
 import sys
 import time
 
-RFCOMM_CH  = 2
+RFCOMM_CH       = 2
 RECONNECT_DELAY = 5  # seconds
+ANC_STATE_FILE  = "/tmp/pbwidget-anc"
 ANC_STATES = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
 
 _KV_RE = re.compile(r'^([A-Z_][A-Z0-9_]*)=(.+?)(?:\s+#.*)?$')
@@ -77,6 +78,11 @@ def _decode_anc(payload):
     return next((v for k, v in ANC_STATES.items() if payload[3] & k), None)
 
 
+def _write_state(state):
+    with open(ANC_STATE_FILE, "w") as f:
+        f.write(state)
+
+
 def _trigger_widget():
     subprocess.run(["/usr/local/bin/pbwidget"], check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -96,6 +102,8 @@ def run(mac):
                 g, c, p = _read_msg(sock)
                 if g == 0x08 and c == 0x13 and len(p) >= 4:
                     state = _decode_anc(p)
+                    if state:
+                        _write_state(state)
                     if state and state != last_state:
                         last_state = state
                         print(f"bt-pixel-buds-anc: ANC → {state}", flush=True)

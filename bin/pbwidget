@@ -17,10 +17,11 @@ from gi.repository import Rsvg
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-OUTPUT_PATH   = "/tmp/pbwidget.png"
-EAR_TMP_PATH  = "/tmp/pbwidget-ear.svg"
-RFCOMM_CH     = 2
-ANC_STATES    = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
+OUTPUT_PATH    = "/tmp/pbwidget.png"
+EAR_TMP_PATH   = "/tmp/pbwidget-ear.svg"
+ANC_STATE_FILE = "/tmp/pbwidget-anc"   # written by bt-pixel-buds-anc daemon
+RFCOMM_CH      = 2
+ANC_STATES     = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
 GAUGE_LABELS  = [("left", "L"), ("case", "C"), ("right", "R")]
 ANC_MODES     = [
     ("noise_cancellation", "Noise cancellation"),
@@ -134,6 +135,16 @@ def _read_rfcomm_msg(sock):
     return h[0], h[1], p
 
 def query_anc(mac):
+    # Prefer the state file written by bt-pixel-buds-anc (which holds the RFCOMM
+    # connection), falling back to a direct query when the daemon isn't running.
+    try:
+        with open(ANC_STATE_FILE) as f:
+            state = f.read().strip()
+        if state in ("noise_cancellation", "transparency", "adaptive", "off"):
+            return state
+    except OSError:
+        pass
+
     try:
         s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
         s.settimeout(3)
