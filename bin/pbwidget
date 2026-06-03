@@ -56,19 +56,36 @@ def load_config():
            or cfg.get("DEVICE_MAC")
            or "AC:3E:B1:8E:4C:75")
 
+    def _int(key, default):
+        try:
+            return int(cfg.get(key, str(default)))
+        except (ValueError, TypeError):
+            return default
+
+    def _float(key, default):
+        try:
+            return float(cfg.get(key, str(default)))
+        except (ValueError, TypeError):
+            return default
+
+    warn     = _int("BATTERY_WARN",     50)
+    critical = _int("BATTERY_CRITICAL", 10)
+    if critical >= warn:
+        critical = max(0, warn - 1)
+
     return {
         "DEVICE_MAC":   mac,
         "BG_COLOR":     cfg.get("BG_COLOR",    "#1e1e2e"),
         "TEXT_COLOR":   cfg.get("TEXT_COLOR",   "#cdd6f4"),
         "ACCENT_COLOR": cfg.get("ACCENT_COLOR", "#89b4fa"),
         "RING_COLOR":   cfg.get("RING_COLOR",   "#ffffff20"),
-        "OPACITY":      float(cfg.get("OPACITY",    "0.0")),
-        "AUTO_CLOSE":   int(cfg.get("AUTO_CLOSE",   "5000")),
-        "IMAGE_SIZE":   int(cfg.get("IMAGE_SIZE",   "300")),
+        "OPACITY":      _float("OPACITY",    0.0),
+        "AUTO_CLOSE":   _int("AUTO_CLOSE",   5000),
+        "IMAGE_SIZE":   max(100, _int("IMAGE_SIZE", 300)),
         "SPRITES_DIR":  os.path.expanduser("~/.local/share/pbwidget"),
         "ICON_THEME":        cfg.get("ICON_THEME", "Yaru"),
-        "BATTERY_WARN":      int(cfg.get("BATTERY_WARN",     "50")),
-        "BATTERY_CRITICAL":  int(cfg.get("BATTERY_CRITICAL", "10")),
+        "BATTERY_WARN":      warn,
+        "BATTERY_CRITICAL":  critical,
         "ANC_ADAPTIVE":      cfg.get("ANC_ADAPTIVE", "auto").lower(),
     }
 
@@ -279,8 +296,31 @@ def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color,
     ctx.restore()
 
 
+def _draw_unknown_gauge(ctx, cx, cy, radius, thickness, label, ring, text_color):
+    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+    ctx.set_line_width(thickness)
+    ring_start = -math.pi / 2 + GAP / 2
+    ring_end   = -math.pi / 2 - GAP / 2 + 2 * math.pi
+    ctx.set_source_rgba(*ring)
+    ctx.new_sub_path()
+    ctx.arc(cx, cy, radius, ring_start, ring_end)
+    ctx.stroke()
+    ctx.set_source_rgba(*text_color)
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(radius * 0.60)
+    ext = ctx.text_extents(label)
+    ctx.move_to(cx - ext.width / 2 - ext.x_bearing, cy - ext.height / 2 - ext.y_bearing)
+    ctx.show_text(label)
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(radius * 0.34)
+    ext2 = ctx.text_extents("?")
+    pct_y = cy + radius + thickness + radius * 0.25
+    ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
+    ctx.show_text("?")
+
+
 def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
-               accent, ring, text_color, bg_rgba, sprite_surface, manifest, charging,
+               ring, text_color, bg_rgba, sprite_surface, manifest, charging,
                icon_theme="Yaru", battery_warn=50, battery_critical=10):
     ctx.set_line_cap(cairo.LINE_CAP_ROUND)
     ctx.set_line_width(thickness)
@@ -328,10 +368,11 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.set_source_rgba(*text_color)
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(radius * 0.34)
-    ext2 = ctx.text_extents(f"{pct}%")
+    pct_str = f"{pct}%"
+    ext2 = ctx.text_extents(pct_str)
     pct_y = cy + radius + thickness + radius * 0.25
     ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
-    ctx.show_text(f"{pct}%")
+    ctx.show_text(pct_str)
 
     draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color, bg_rgba)
 
@@ -527,14 +568,21 @@ def render(data, cfg):
     pos_w     = W / n          # dynamic positioning
     radius    = col_w * 0.34
     thickness = max(4, col_w * 0.08)
-    cy        = title_h + col_w * 0.40
+    # cy must leave room for the badge circle above the ring: badge top = cy - radius - circle_r
+    # circle_r ≈ radius * 0.333, so minimum cy = radius * 1.34; 0.50 * col_w gives safe clearance.
+    cy        = title_h + col_w * 0.50
 
-    for i, (key, label) in enumerate(visible):
-        cx = pos_w * i + pos_w / 2
-        draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
-                   accent_rgba, ring_rgba, text_rgba, bg_rgba, sprite_surface, manifest,
-                   data.get(f"{key}_charging", False), cfg["ICON_THEME"],
-                   cfg["BATTERY_WARN"], cfg["BATTERY_CRITICAL"])
+    if visible:
+        for i, (key, label) in enumerate(visible):
+            cx = pos_w * i + pos_w / 2
+            draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
+                       ring_rgba, text_rgba, bg_rgba, sprite_surface, manifest,
+                       data.get(f"{key}_charging", False), cfg["ICON_THEME"],
+                       cfg["BATTERY_WARN"], cfg["BATTERY_CRITICAL"])
+    else:
+        for i, (key, label) in enumerate(GAUGE_LABELS):
+            cx = (W / 3) * i + (W / 3) / 2
+            _draw_unknown_gauge(ctx, cx, cy, radius, thickness, label, ring_rgba, text_rgba)
 
     sep_y = title_h + cell + anc_h * 0.04
     ctx.set_source_rgba(*(*text_rgba[:3], 0.15))
