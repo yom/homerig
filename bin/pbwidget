@@ -303,11 +303,6 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
     ctx.show_text(pct_text)
 
-    if charging and sprite_surface is not None and "flash" in manifest:
-        flash = manifest["flash"]
-        flash_cy = cy + radius * 0.45
-        draw_sprite(ctx, sprite_surface, flash, cx, flash_cy)
-
     draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_color)
 
 
