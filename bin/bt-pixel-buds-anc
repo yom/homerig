@@ -75,12 +75,15 @@ def _connect(mac):
 
 
 def _decode_anc(payload):
-    return next((v for k, v in ANC_STATES.items() if payload[3] & k), None)
+    state = next((v for k, v in ANC_STATES.items() if payload[3] & k), None)
+    # byte 1 = UI toggles bitmask: which modes this device supports
+    supported = [v for k, v in ANC_STATES.items() if len(payload) > 1 and payload[1] & k]
+    return state, supported
 
 
-def _write_state(state):
+def _write_state(state, supported):
     with open(ANC_STATE_FILE, "w") as f:
-        f.write(state)
+        f.write(state + "\n" + ",".join(supported))
 
 
 def _trigger_widget():
@@ -101,12 +104,12 @@ def run(mac):
             while True:
                 g, c, p = _read_msg(sock)
                 if g == 0x08 and c == 0x13 and len(p) >= 4:
-                    state = _decode_anc(p)
+                    state, supported = _decode_anc(p)
                     if state:
-                        _write_state(state)
+                        _write_state(state, supported)
                     if state and state != last_state:
                         last_state = state
-                        print(f"bt-pixel-buds-anc: ANC → {state}", flush=True)
+                        print(f"bt-pixel-buds-anc: ANC → {state} (supported: {supported})", flush=True)
                         _trigger_widget()
 
         except Exception as e:

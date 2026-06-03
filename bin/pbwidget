@@ -69,6 +69,7 @@ def load_config():
         "ICON_THEME":        cfg.get("ICON_THEME", "Yaru"),
         "BATTERY_WARN":      int(cfg.get("BATTERY_WARN",     "50")),
         "BATTERY_CRITICAL":  int(cfg.get("BATTERY_CRITICAL", "10")),
+        "ANC_ADAPTIVE":      cfg.get("ANC_ADAPTIVE", "auto").lower(),
     }
 
 # ── Battery query ─────────────────────────────────────────────────────────────
@@ -137,14 +138,20 @@ def _read_rfcomm_msg(sock):
         p += chunk
     return h[0], h[1], p
 
+_ALL_ANC_MODES = {"noise_cancellation", "transparency", "adaptive", "off"}
+
 def query_anc(mac):
     # Prefer the state file written by bt-pixel-buds-anc (which holds the RFCOMM
     # connection), falling back to a direct query when the daemon isn't running.
+    # Returns (state, supported_modes_set).
     try:
         with open(ANC_STATE_FILE) as f:
-            state = f.read().strip()
-        if state in ("noise_cancellation", "transparency", "adaptive", "off"):
-            return state
+            lines = f.read().strip().splitlines()
+        state = lines[0] if lines else "unknown"
+        has_caps = len(lines) > 1 and lines[1].strip()
+        supported = set(lines[1].split(",")) & _ALL_ANC_MODES if has_caps else None
+        if state in _ALL_ANC_MODES:
+            return state, supported
     except OSError:
         pass
 
@@ -163,10 +170,12 @@ def query_anc(mac):
         g, c, p = _read_rfcomm_msg(s)
         s.close()
         if g == 0x08 and c == 0x13 and len(p) >= 4:
-            return next((v for k, v in ANC_STATES.items() if p[3] & k), "unknown")
+            state = next((v for k, v in ANC_STATES.items() if p[3] & k), "unknown")
+            supported = {v for k, v in ANC_STATES.items() if len(p) > 1 and p[1] & k}
+            return state, supported if supported else None
     except Exception:
         pass
-    return "unknown"
+    return "unknown", None
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
@@ -425,13 +434,18 @@ def draw_anc_icon(ctx, cx, cy, r, mode_key, active_key, accent_rgba, text_rgba, 
     ctx.stroke()
 
 
-def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba, icon_theme="Yaru"):
-    cell = W // 4
+def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba,
+                 icon_theme="Yaru", supported_modes=None):
+    modes = [(k, l) for k, l in ANC_MODES if supported_modes is None or k in supported_modes]
+    n = len(modes)
+    if n == 0:
+        return
+    cell = W // n
     icon_r = anc_h * 0.28
     label_font = max(6, anc_h * 0.14)
     icon_cy = anc_y + anc_h * 0.42
 
-    for i, (mode_key, mode_label) in enumerate(ANC_MODES):
+    for i, (mode_key, mode_label) in enumerate(modes):
         cx = cell * i + cell / 2
         draw_anc_icon(ctx, cx, icon_cy, icon_r, mode_key, active_key, accent_rgba, text_rgba, icon_theme)
 
@@ -530,7 +544,8 @@ def render(data, cfg):
     ctx.line_to(W * 0.95, sep_y)
     ctx.stroke()
 
-    draw_anc_row(ctx, W, title_h + cell, anc_h, anc, accent_rgba, text_rgba, cfg["ICON_THEME"])
+    draw_anc_row(ctx, W, title_h + cell, anc_h, anc, accent_rgba, text_rgba,
+                 cfg["ICON_THEME"], cfg.get("_ANC_SUPPORTED"))
     surface.write_to_png(OUTPUT_PATH)
 
 # ── Notification ──────────────────────────────────────────────────────────────
@@ -551,7 +566,24 @@ def notify(cfg):
 def main():
     cfg  = load_config()
     data = query_battery(cfg["DEVICE_MAC"])
-    data["anc"] = query_anc(cfg["DEVICE_MAC"])
+    anc_state, anc_supported = query_anc(cfg["DEVICE_MAC"])
+    data["anc"] = anc_state
+
+    # Resolve which ANC modes to show:
+    #   ANC_ADAPTIVE=auto  → use capabilities from device (default)
+    #   ANC_ADAPTIVE=true  → always show adaptive
+    #   ANC_ADAPTIVE=false → never show adaptive
+    anc_adaptive_cfg = cfg["ANC_ADAPTIVE"]
+    if anc_adaptive_cfg == "false":
+        cfg["_ANC_SUPPORTED"] = _ALL_ANC_MODES - {"adaptive"}
+    elif anc_adaptive_cfg == "true":
+        cfg["_ANC_SUPPORTED"] = None  # show all 4
+    else:  # auto
+        if anc_supported:
+            cfg["_ANC_SUPPORTED"] = anc_supported
+        else:
+            cfg["_ANC_SUPPORTED"] = _ALL_ANC_MODES - {"adaptive"}  # safe default for Pro 1
+
     render(data, cfg)
     notify(cfg)
 
