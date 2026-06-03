@@ -276,13 +276,8 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.set_line_cap(cairo.LINE_CAP_ROUND)
     ctx.set_line_width(thickness)
 
-    # Background ring — open arc, gap centered at top (12 o'clock)
-    ring_start = -math.pi / 2 + GAP / 2
-    ring_end   = -math.pi / 2 - GAP / 2 + 2 * math.pi
-    ctx.set_source_rgba(*ring)
-    ctx.new_sub_path()
-    ctx.arc(cx, cy, radius, ring_start, ring_end)
-    ctx.stroke()
+    if pct < 0:
+        return  # unknown — draw nothing
 
     if pct < battery_critical:
         arc_color = (0.90, 0.20, 0.20, 1.0)   # red
@@ -290,6 +285,14 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
         arc_color = (0.95, 0.75, 0.10, 1.0)   # yellow
     else:
         arc_color = (0.30, 0.80, 0.35, 1.0)   # green
+
+    # Background ring — open arc, gap centered at top (12 o'clock)
+    ring_start = -math.pi / 2 + GAP / 2
+    ring_end   = -math.pi / 2 - GAP / 2 + 2 * math.pi
+    ctx.set_source_rgba(*ring)
+    ctx.new_sub_path()
+    ctx.arc(cx, cy, radius, ring_start, ring_end)
+    ctx.stroke()
 
     if pct > 0:
         arc_span = (2 * math.pi - GAP)
@@ -316,11 +319,10 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.set_source_rgba(*text_color)
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(radius * 0.34)
-    pct_text = f"{pct}%" if pct >= 0 else "?"
-    ext2 = ctx.text_extents(pct_text)
+    ext2 = ctx.text_extents(f"{pct}%")
     pct_y = cy + radius + thickness + radius * 0.25
     ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
-    ctx.show_text(pct_text)
+    ctx.show_text(f"{pct}%")
 
     draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color, bg_rgba)
 
@@ -499,17 +501,21 @@ def render(data, cfg):
                     title_h / 2 - ext.height / 2 - ext.y_bearing)
         ctx.show_text(title)
 
-    thickness    = max(4, cell * 0.08)
-    radius       = cell * 0.34
-    cy           = title_h + cell * 0.40
     accent_rgba  = hex_to_rgba(accent)
     ring_rgba    = hex_to_rgba(ring)
     text_rgba    = hex_to_rgba(text)
     bg_rgba      = hex_to_rgba(bg)
     sprite_surface, manifest = load_sprites(cfg["SPRITES_DIR"])
 
-    for i, (key, label) in enumerate(GAUGE_LABELS):
-        cx = cell * i + cell / 2
+    visible = [(key, label) for key, label in GAUGE_LABELS if data.get(key, -1) >= 0]
+    n = max(len(visible), 1)
+    col_w     = W / n
+    radius    = col_w * 0.34
+    thickness = max(4, col_w * 0.08)
+    cy        = title_h + col_w * 0.40
+
+    for i, (key, label) in enumerate(visible):
+        cx = col_w * i + col_w / 2
         draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
                    accent_rgba, ring_rgba, text_rgba, bg_rgba, sprite_surface, manifest,
                    data.get(f"{key}_charging", False), cfg["ICON_THEME"],
