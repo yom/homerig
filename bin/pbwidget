@@ -312,11 +312,6 @@ def _draw_unknown_gauge(ctx, cx, cy, radius, thickness, label, ring, text_color)
     ctx.move_to(cx - ext.width / 2 - ext.x_bearing, cy - ext.height / 2 - ext.y_bearing)
     ctx.show_text(label)
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(radius * 0.34)
-    ext2 = ctx.text_extents("?")
-    pct_y = cy + radius + thickness + radius * 0.25
-    ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
-    ctx.show_text("?")
 
 
 def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
@@ -364,15 +359,6 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
         ext = ctx.text_extents(label)
         ctx.move_to(cx - ext.width / 2 - ext.x_bearing, cy - ext.height / 2 - ext.y_bearing)
         ctx.show_text(label)
-
-    ctx.set_source_rgba(*text_color)
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(radius * 0.34)
-    pct_str = f"{pct}%"
-    ext2 = ctx.text_extents(pct_str)
-    pct_y = cy + radius + thickness + radius * 0.25
-    ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
-    ctx.show_text(pct_str)
 
     draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color, bg_rgba)
 
@@ -530,10 +516,11 @@ def render(data, cfg):
     title  = data.get("device_name", "")
     anc    = data.get("anc", "unknown")
 
-    cell    = size // 3
-    title_h = int(cell * 0.35) if title else 0
-    anc_h   = int(cell * 0.75)
-    W, H    = size, title_h + cell + anc_h
+    cell      = size // 3
+    title_h   = int(cell * 0.35) if title else 0
+    summary_h = int(cell * 0.28)
+    anc_h     = int(cell * 0.75)
+    W, H      = size, title_h + cell + summary_h + anc_h
 
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     ctx     = cairo.Context(surface)
@@ -584,7 +571,26 @@ def render(data, cfg):
             cx = (W / 3) * i + (W / 3) / 2
             _draw_unknown_gauge(ctx, cx, cy, radius, thickness, label, ring_rgba, text_rgba)
 
-    sep_y = title_h + cell + anc_h * 0.04
+    # Summary line: "Left: NN%   Case: NN%   Right: NN%"
+    label_map = {"left": "Left", "case": "Case", "right": "Right"}
+    parts = []
+    for key, _ in GAUGE_LABELS:
+        pct = data.get(key, -1)
+        parts.append(f"{label_map[key]}: {pct}%" if pct >= 0 else f"{label_map[key]}: —")
+    summary_text = "   ".join(parts)
+    ctx.set_source_rgba(*text_rgba)
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    summary_font = max(7, cell * 0.11)
+    ctx.set_font_size(summary_font)
+    while ctx.text_extents(summary_text).width > W * 0.92 and summary_font > 7:
+        summary_font -= 0.5
+        ctx.set_font_size(summary_font)
+    ext_s = ctx.text_extents(summary_text)
+    summary_y = title_h + cell + summary_h * 0.55
+    ctx.move_to(W / 2 - ext_s.width / 2 - ext_s.x_bearing, summary_y - ext_s.y_bearing)
+    ctx.show_text(summary_text)
+
+    sep_y = title_h + cell + summary_h + anc_h * 0.04
     ctx.set_source_rgba(*(*text_rgba[:3], 0.15))
     ctx.set_line_width(1)
     ctx.set_dash([])
@@ -592,7 +598,7 @@ def render(data, cfg):
     ctx.line_to(W * 0.95, sep_y)
     ctx.stroke()
 
-    draw_anc_row(ctx, W, title_h + cell, anc_h, anc, accent_rgba, text_rgba,
+    draw_anc_row(ctx, W, title_h + cell + summary_h, anc_h, anc, accent_rgba, text_rgba,
                  cfg["ICON_THEME"], cfg.get("_ANC_SUPPORTED"))
     surface.write_to_png(OUTPUT_PATH)
 
