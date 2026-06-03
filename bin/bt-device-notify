@@ -36,15 +36,17 @@ dbus-monitor --system \
         if [[ "$prev_line" == *'"Connected"'* ]]; then
             if [[ "$line" == *"boolean true"* || "$line" == *"boolean false"* ]]; then
                 if [[ "$line" == *"boolean true"* ]]; then
-                    dunstify -r "$NOTIFICATION_ID" -i bluetooth \
-                        -t "$NOTIFICATION_TIMEOUT" \
-                        "Pixel Buds Connected" "Pixel Buds Pro"
+                    bash "$HOME/.config/pbwidget/scripts/notify.sh" 2>/dev/null || \
+                        dunstify -r "$NOTIFICATION_ID" -i bluetooth \
+                            -t "$NOTIFICATION_TIMEOUT" \
+                            "Pixel Buds Connected" "Pixel Buds Pro"
                 else
-                    dunstify -r "$NOTIFICATION_ID" -i bluetooth \
+                    dunstify -r "$NOTIFICATION_ID" \
+                        --appname "pbwidget" \
+                        -i bluetooth \
                         -t "$NOTIFICATION_TIMEOUT" \
-                        "Pixel Buds Disconnected" "Pixel Buds Pro"
+                        "Pixel Buds Disconnected" ""
                 fi
-                bash "$HOME/.config/pbwidget/scripts/notify.sh" 2>/dev/null || true
             fi
         fi
     fi
