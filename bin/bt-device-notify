@@ -41,11 +41,12 @@ dbus-monitor --system \
                             -t "$NOTIFICATION_TIMEOUT" \
                             "Pixel Buds Connected" "Pixel Buds Pro"
                 else
-                    dunstify -r "$NOTIFICATION_ID" \
-                        --appname "pbwidget" \
-                        -i bluetooth \
-                        -t "$NOTIFICATION_TIMEOUT" \
-                        "Pixel Buds Disconnected" ""
+                    /usr/local/bin/pbwidget --disconnected 2>/dev/null || \
+                        dunstify -r "$NOTIFICATION_ID" \
+                            --appname "pbwidget" \
+                            -i bluetooth \
+                            -t "$NOTIFICATION_TIMEOUT" \
+                            "Pixel Buds Disconnected" ""
                 fi
             fi
         fi

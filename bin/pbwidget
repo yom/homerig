@@ -91,6 +91,20 @@ def load_config():
 
 # ── Battery query ─────────────────────────────────────────────────────────────
 
+def _lookup_device_name(device_mac):
+    try:
+        out = subprocess.check_output(["bluetoothctl", "devices"],
+                                      stderr=subprocess.DEVNULL, text=True)
+        for line in out.splitlines():
+            if device_mac and device_mac.upper() in line.upper():
+                return re.sub(r'^Device\s+\S+\s+', '', line).strip()
+        for line in out.splitlines():
+            if "pixel bud" in line.lower():
+                return re.sub(r'^Device\s+\S+\s+', '', line).strip()
+    except Exception:
+        pass
+    return ""
+
 def _extract_pct(line):
     m = re.search(r':\s*(\d+)%', line)
     return int(m.group(1)) if m else -1
@@ -120,20 +134,7 @@ def query_battery(device_mac):
             data["case"] = _extract_pct(line)
             data["case_charging"] = _extract_charging(line)
 
-    try:
-        bt_out = subprocess.check_output(["bluetoothctl", "devices"],
-                                         stderr=subprocess.DEVNULL, text=True)
-        for line in bt_out.splitlines():
-            if device_mac and device_mac.upper() in line.upper():
-                data["device_name"] = re.sub(r'^Device\s+\S+\s+', '', line).strip()
-                break
-        if not data["device_name"]:
-            for line in bt_out.splitlines():
-                if "pixel bud" in line.lower():
-                    data["device_name"] = re.sub(r'^Device\s+\S+\s+', '', line).strip()
-                    break
-    except Exception:
-        pass
+    data["device_name"] = _lookup_device_name(device_mac)
 
     return data
 
@@ -608,8 +609,55 @@ def notify(cfg):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def render_disconnected(cfg):
+    size   = cfg["IMAGE_SIZE"]
+    bg     = cfg["BG_COLOR"]
+    text   = cfg["TEXT_COLOR"]
+    opacity = cfg["OPACITY"]
+
+    W = size
+    H = size // 2
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
+    ctx     = cairo.Context(surface)
+
+    bg_r, bg_g, bg_b, _ = hex_to_rgba(bg)
+    ctx.set_source_rgba(bg_r, bg_g, bg_b, opacity)
+    ctx.rectangle(0, 0, W, H)
+    ctx.fill()
+
+    sprite_surface, manifest = load_sprites(cfg["SPRITES_DIR"])
+    if sprite_surface is not None and "disconnected" in manifest:
+        sprite = manifest["disconnected"]
+        sprite_h = H * 0.65
+        scale = sprite_h / sprite["h"]
+        draw_sprite(ctx, sprite_surface, sprite, W / 2, H * 0.46, scale)
+
+    ctx.set_source_rgba(*hex_to_rgba(text))
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    font_size = H * 0.14
+    ctx.set_font_size(font_size)
+    label = f"{cfg.get('_DEVICE_NAME', 'Pixel Buds')} disconnected."
+    while ctx.text_extents(label).width > W * 0.92 and font_size > 6:
+        font_size -= 0.5
+        ctx.set_font_size(font_size)
+    ext = ctx.text_extents(label)
+    ctx.move_to(W / 2 - ext.width / 2 - ext.x_bearing,
+                H * 0.90 - ext.y_bearing)
+    ctx.show_text(label)
+
+    surface.write_to_png(OUTPUT_PATH)
+
+
 def main():
+    disconnected = "--disconnected" in sys.argv
     cfg  = load_config()
+
+    if disconnected:
+        cfg["_DEVICE_NAME"] = _lookup_device_name(cfg["DEVICE_MAC"]) or "Pixel Buds"
+        render_disconnected(cfg)
+        notify(cfg)
+        return
+
     data = query_battery(cfg["DEVICE_MAC"])
     anc_state, anc_supported = query_anc(cfg["DEVICE_MAC"])
     data["anc"] = anc_state
