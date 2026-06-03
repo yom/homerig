@@ -508,14 +508,15 @@ def render(data, cfg):
     sprite_surface, manifest = load_sprites(cfg["SPRITES_DIR"])
 
     visible = [(key, label) for key, label in GAUGE_LABELS if data.get(key, -1) >= 0]
-    n = max(len(visible), 1)
-    col_w     = W / n
+    n         = max(len(visible), 1)
+    col_w     = W / 3          # fixed sizing based on 3 columns
+    pos_w     = W / n          # dynamic positioning
     radius    = col_w * 0.34
     thickness = max(4, col_w * 0.08)
     cy        = title_h + col_w * 0.40
 
     for i, (key, label) in enumerate(visible):
-        cx = col_w * i + col_w / 2
+        cx = pos_w * i + pos_w / 2
         draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
                    accent_rgba, ring_rgba, text_rgba, bg_rgba, sprite_surface, manifest,
                    data.get(f"{key}_charging", False), cfg["ICON_THEME"],
