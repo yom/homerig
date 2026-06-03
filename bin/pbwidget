@@ -18,7 +18,6 @@ from gi.repository import Rsvg
 # ── Constants ────────────────────────────────────────────────────────────────
 
 OUTPUT_PATH    = "/tmp/pbwidget.png"
-EAR_TMP_PATH   = "/tmp/pbwidget-ear.svg"
 ANC_STATE_FILE = "/tmp/pbwidget-anc"   # written by bt-pixel-buds-anc daemon
 RFCOMM_CH      = 2
 ANC_STATES     = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
@@ -30,7 +29,8 @@ ANC_MODES     = [
     ("transparency",       "Transparency"),
 ]
 
-EAR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="gray" fill-rule="evenodd" d="M11.742.758a.5.5 0 0 0-.354.146.5.5 0 0 0 0 .707A5.5 5.5 0 0 1 13 5.5a5.503 5.503 0 0 1-1.621 3.879.5.5 0 0 0 0 .707.5.5 0 0 0 .707 0A6.497 6.497 0 0 0 14 5.502a.5.5 0 0 0 0-.002A6.5 6.5 0 0 0 12.096.904a.5.5 0 0 0-.354-.146zM7.5 1A4.5 4.5 0 0 0 3 5.5a.499.499 0 1 0 1 0A3.5 3.5 0 0 1 7.5 2 3.5 3.5 0 0 1 11 5.498a3.5 3.5 0 0 1 0 .002c-.002.67-.152 1.045-.371 1.346-.22.301-.541.537-.92.822-.758.57-1.69 1.435-1.71 3.326l.5.006H8a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.5c0-.277-.222-.5-.5-.5h-.025a.5.5 0 0 0-.474.5v.5a3 3 0 0 0 3 3 3 3 0 0 0 3-2.994A3 3 0 0 0 9 11c.018-1.604.582-1.983 1.312-2.533.366-.276.787-.568 1.125-1.033s.56-1.097.563-1.932l-.5-.002h.5A4.5 4.5 0 0 0 7.5 1zm0 3A1.5 1.5 0 0 0 6 5.5 1.5 1.5 0 0 0 7.5 7 1.5 1.5 0 0 0 9 5.5 1.5 1.5 0 0 0 7.5 4z"/></svg>'
+EAR_ICON_NAME = "hearing-symbolic"
+EAR_ICON_SUBDIR = "org.gnome.Settings"
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -66,6 +66,7 @@ def load_config():
         "AUTO_CLOSE":   int(cfg.get("AUTO_CLOSE",   "5000")),
         "IMAGE_SIZE":   int(cfg.get("IMAGE_SIZE",   "300")),
         "SPRITES_DIR":  os.path.expanduser("~/.local/share/pbwidget"),
+        "ICON_THEME":   cfg.get("ICON_THEME", "Yaru"),
     }
 
 # ── Battery query ─────────────────────────────────────────────────────────────
@@ -198,19 +199,83 @@ def draw_sprite(ctx, sprite_surface, sprite, cx, cy, scale=1.0):
     ctx.restore()
 
 
+GAP = math.radians(80)  # 80° opening at top of each gauge ring
+
+_icon_handles = {}
+
+def _get_icon_handle(icon_name, icon_theme):
+    key = (icon_name, icon_theme)
+    if key not in _icon_handles:
+        path = f"/usr/share/icons/{icon_theme}/scalable/status/{icon_name}.svg"
+        if not os.path.exists(path):
+            path = f"/usr/share/icons/{icon_theme}/scalable/status/battery-missing-symbolic.svg"
+        try:
+            _icon_handles[key] = Rsvg.Handle.new_from_file(path)
+        except Exception:
+            _icon_handles[key] = None
+    return _icon_handles[key]
+
+
+def _battery_icon_name(pct, charging):
+    if pct < 0:
+        return "battery-missing-symbolic"
+    level = round(pct / 10) * 10
+    level = max(0, min(100, level))
+    if charging:
+        return f"battery-level-{level}-charging-symbolic"
+    return f"battery-level-{level}-symbolic"
+
+
+def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_rgba):
+    icon_name = _battery_icon_name(pct, charging)
+    handle = _get_icon_handle(icon_name, icon_theme)
+    if handle is None:
+        return
+
+    dims = handle.get_intrinsic_dimensions()
+    vb = dims.out_viewbox
+    svg_w = vb.width if vb.width > 0 else 16.0
+    svg_h = vb.height if vb.height > 0 else 16.0
+
+    # Fit icon inside the gap: width = chord of the gap at the ring radius
+    gap_chord = 2 * radius * math.sin(GAP / 2)
+    icon_size = gap_chord * 0.36
+    px = max(1, int(icon_size * svg_w / svg_h))  # preserve aspect ratio
+    py = max(1, int(icon_size))
+
+    tmp = cairo.ImageSurface(cairo.FORMAT_ARGB32, px, py)
+    tmp_ctx = cairo.Context(tmp)
+    viewport = Rsvg.Rectangle()
+    viewport.x, viewport.y, viewport.width, viewport.height = 0, 0, svg_w, svg_h
+    tmp_ctx.scale(px / svg_w, py / svg_h)
+    handle.render_document(tmp_ctx, viewport)
+
+    # Tint with text color
+    r_col, g_col, b_col, a_col = text_rgba
+    ctx.save()
+    ctx.set_source_rgba(r_col, g_col, b_col, a_col)
+    ctx.mask_surface(tmp, cx - px / 2, cy - radius - py / 2)
+    ctx.restore()
+
+
 def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
-               accent, ring, text_color, sprite_surface, manifest, charging):
+               accent, ring, text_color, sprite_surface, manifest, charging,
+               icon_theme="Yaru"):
     ctx.set_line_cap(cairo.LINE_CAP_ROUND)
     ctx.set_line_width(thickness)
 
+    # Background ring — open arc, gap centered at top (12 o'clock)
+    ring_start = -math.pi / 2 + GAP / 2
+    ring_end   = -math.pi / 2 - GAP / 2 + 2 * math.pi
     ctx.set_source_rgba(*ring)
     ctx.new_sub_path()
-    ctx.arc(cx, cy, radius, 0, 2 * math.pi)
+    ctx.arc(cx, cy, radius, ring_start, ring_end)
     ctx.stroke()
 
     if pct > 0:
-        start = -math.pi / 2
-        end = start + (pct / 100) * 2 * math.pi
+        arc_span = (2 * math.pi - GAP)  # usable arc length
+        start = ring_start
+        end = start + (pct / 100) * arc_span
         ctx.set_source_rgba(*accent)
         ctx.new_sub_path()
         ctx.arc(cx, cy, radius, start, end)
@@ -243,21 +308,20 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
         flash_cy = cy + radius * 0.45
         draw_sprite(ctx, sprite_surface, flash, cx, flash_cy)
 
-
-_ear_handle = None
-
-def _get_ear_handle():
-    global _ear_handle
-    if _ear_handle is None:
-        if not os.path.exists(EAR_TMP_PATH):
-            with open(EAR_TMP_PATH, "w") as f:
-                f.write(EAR_SVG)
-        _ear_handle = Rsvg.Handle.new_from_file(EAR_TMP_PATH)
-    return _ear_handle
+    draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_color)
 
 
-def draw_ear(ctx, cx, cy, r):
-    handle = _get_ear_handle()
+def draw_ear(ctx, cx, cy, r, icon_theme="Yaru"):
+    key = ("ear", icon_theme)
+    if key not in _icon_handles:
+        path = f"/usr/share/icons/{icon_theme}/scalable/{EAR_ICON_SUBDIR}/{EAR_ICON_NAME}.svg"
+        try:
+            _icon_handles[key] = Rsvg.Handle.new_from_file(path)
+        except Exception:
+            _icon_handles[key] = None
+    handle = _icon_handles[key]
+    if handle is None:
+        return
     dims = handle.get_intrinsic_dimensions()
     vb = dims.out_viewbox
     svg_w = vb.width if vb.width > 0 else 16.0
@@ -280,7 +344,7 @@ def draw_ear(ctx, cx, cy, r):
     ctx.restore()
 
 
-def draw_anc_icon(ctx, cx, cy, r, mode_key, active_key, accent_rgba, text_rgba):
+def draw_anc_icon(ctx, cx, cy, r, mode_key, active_key, accent_rgba, text_rgba, icon_theme="Yaru"):
     is_active = mode_key == active_key
     color = accent_rgba if is_active else (*text_rgba[:3], 0.30)
 
@@ -341,11 +405,11 @@ def draw_anc_icon(ctx, cx, cy, r, mode_key, active_key, accent_rgba, text_rgba):
 
     ctx.set_source_rgba(*color)
     ctx.set_line_width(lw * 0.9)
-    draw_ear(ctx, cx, cy, r)
+    draw_ear(ctx, cx, cy, r, icon_theme)
     ctx.stroke()
 
 
-def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba):
+def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba, icon_theme="Yaru"):
     cell = W // 4
     icon_r = anc_h * 0.28
     label_font = max(6, anc_h * 0.14)
@@ -353,7 +417,7 @@ def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba):
 
     for i, (mode_key, mode_label) in enumerate(ANC_MODES):
         cx = cell * i + cell / 2
-        draw_anc_icon(ctx, cx, icon_cy, icon_r, mode_key, active_key, accent_rgba, text_rgba)
+        draw_anc_icon(ctx, cx, icon_cy, icon_r, mode_key, active_key, accent_rgba, text_rgba, icon_theme)
 
         color = accent_rgba if mode_key == active_key else (*text_rgba[:3], 0.30)
         ctx.set_source_rgba(*color)
@@ -433,7 +497,7 @@ def render(data, cfg):
         cx = cell * i + cell / 2
         draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
                    accent_rgba, ring_rgba, text_rgba, sprite_surface, manifest,
-                   data.get(f"{key}_charging", False))
+                   data.get(f"{key}_charging", False), cfg["ICON_THEME"])
 
     sep_y = title_h + cell + anc_h * 0.04
     ctx.set_source_rgba(*(*text_rgba[:3], 0.15))
@@ -443,7 +507,7 @@ def render(data, cfg):
     ctx.line_to(W * 0.95, sep_y)
     ctx.stroke()
 
-    draw_anc_row(ctx, W, title_h + cell, anc_h, anc, accent_rgba, text_rgba)
+    draw_anc_row(ctx, W, title_h + cell, anc_h, anc, accent_rgba, text_rgba, cfg["ICON_THEME"])
     surface.write_to_png(OUTPUT_PATH)
 
 # ── Notification ──────────────────────────────────────────────────────────────
