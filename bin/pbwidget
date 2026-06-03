@@ -66,7 +66,9 @@ def load_config():
         "AUTO_CLOSE":   int(cfg.get("AUTO_CLOSE",   "5000")),
         "IMAGE_SIZE":   int(cfg.get("IMAGE_SIZE",   "300")),
         "SPRITES_DIR":  os.path.expanduser("~/.local/share/pbwidget"),
-        "ICON_THEME":   cfg.get("ICON_THEME", "Yaru"),
+        "ICON_THEME":        cfg.get("ICON_THEME", "Yaru"),
+        "BATTERY_WARN":      int(cfg.get("BATTERY_WARN",     "50")),
+        "BATTERY_CRITICAL":  int(cfg.get("BATTERY_CRITICAL", "10")),
     }
 
 # ── Battery query ─────────────────────────────────────────────────────────────
@@ -260,7 +262,7 @@ def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_rgba)
 
 def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
                accent, ring, text_color, sprite_surface, manifest, charging,
-               icon_theme="Yaru"):
+               icon_theme="Yaru", battery_warn=50, battery_critical=10):
     ctx.set_line_cap(cairo.LINE_CAP_ROUND)
     ctx.set_line_width(thickness)
 
@@ -276,7 +278,13 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
         arc_span = (2 * math.pi - GAP)  # usable arc length
         start = ring_start
         end = start + (pct / 100) * arc_span
-        ctx.set_source_rgba(*accent)
+        if pct < battery_critical:
+            arc_color = (0.90, 0.20, 0.20, 1.0)   # red
+        elif pct < battery_warn:
+            arc_color = (0.95, 0.75, 0.10, 1.0)   # yellow
+        else:
+            arc_color = (0.30, 0.80, 0.35, 1.0)   # green
+        ctx.set_source_rgba(*arc_color)
         ctx.new_sub_path()
         ctx.arc(cx, cy, radius, start, end)
         ctx.stroke()
@@ -492,7 +500,8 @@ def render(data, cfg):
         cx = cell * i + cell / 2
         draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
                    accent_rgba, ring_rgba, text_rgba, sprite_surface, manifest,
-                   data.get(f"{key}_charging", False), cfg["ICON_THEME"])
+                   data.get(f"{key}_charging", False), cfg["ICON_THEME"],
+                   cfg["BATTERY_WARN"], cfg["BATTERY_CRITICAL"])
 
     sep_y = title_h + cell + anc_h * 0.04
     ctx.set_source_rgba(*(*text_rgba[:3], 0.15))
