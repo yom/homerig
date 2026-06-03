@@ -64,7 +64,7 @@ def load_config():
         "OPACITY":      float(cfg.get("OPACITY",    "0.0")),
         "AUTO_CLOSE":   int(cfg.get("AUTO_CLOSE",   "5000")),
         "IMAGE_SIZE":   int(cfg.get("IMAGE_SIZE",   "300")),
-        "SPRITES_DIR":  os.path.expanduser("~/.config/pbwidget/images"),
+        "SPRITES_DIR":  os.path.expanduser("~/.local/share/pbwidget"),
     }
 
 # ── Battery query ─────────────────────────────────────────────────────────────
