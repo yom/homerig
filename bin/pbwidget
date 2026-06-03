@@ -575,8 +575,8 @@ def render(data, cfg):
     label_map = {"left": "Left", "case": "Case", "right": "Right"}
     ctx.set_source_rgba(*text_rgba)
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(max(7, cell * 0.11))
-    summary_y = title_h + cell + summary_h * 0.55
+    ctx.set_font_size(max(9, cell * 0.14))
+    summary_y = cy + radius + thickness + radius * 0.20
     for i, (key, _) in enumerate(visible):
         pct = data.get(key, -1)
         lbl = f"{label_map[key]}: {pct}%"
