@@ -37,19 +37,19 @@ export PATH="/sbin:/usr/sbin:${PATH}"
 
 # Add personal binary directory if it exists
 # This is typically used for user-installed scripts and binaries
-[ -d /home/yom/bin ] && export PATH="/home/yom/bin:${PATH}"
+[ -d "$HOME/bin" ] && export PATH="$HOME/bin:${PATH}"
 
 # Add Go binary directory if it exists
 # Go installs binaries here when using 'go install'
-[ -d /home/yom/go/bin ] && export PATH="/home/yom/go/bin:${PATH}"
+[ -d "$HOME/go/bin" ] && export PATH="$HOME/go/bin:${PATH}"
 
 # Add cargo binary directory if it exists
-[ -d /home/yom/.cargo/bin ] && export PATH="/home/yom/.cargo/bin:${PATH}"
+[ -d "$HOME/.cargo/bin" ] && export PATH="$HOME/.cargo/bin:${PATH}"
 
 # Add local Python/pip binary directory if it exists
 # Python packages installed with --user flag place binaries here
-if [ -d /home/yom/.local/bin ] ; then
-    export PATH="/home/yom/.local/bin:${PATH}"
+if [ -d "$HOME/.local/bin" ] ; then
+    export PATH="$HOME/.local/bin:${PATH}"
 fi
 
 # Development Environment Variables

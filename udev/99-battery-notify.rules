@@ -1,10 +1,11 @@
 # Udev rules to show battery notifications when AC adapter is plugged/unplugged
 # Monitors both AC adapter and battery power supply changes
+# Note: DOTFILES_PATH is replaced by install.sh with the actual repo path.
 
 # AC adapter plugged/unplugged
 ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="AC", \
-    RUN+="/home/yom/git/dotfiles/battery"
+    RUN+="/DOTFILES_PATH/battery"
 
 # Battery status changes (charging/discharging/full)
 ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="BAT*", \
-    RUN+="/home/yom/git/dotfiles/battery"
+    RUN+="/DOTFILES_PATH/battery"

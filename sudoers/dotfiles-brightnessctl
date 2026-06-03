@@ -1,0 +1,3 @@
+# Allow the dotfiles user to control brightness without a password prompt.
+# USERNAME is replaced by install.sh with the actual login name.
+USERNAME ALL=(root) NOPASSWD: /usr/bin/brightnessctl

@@ -8,7 +8,7 @@ from PIL import Image
 import Xlib.display
 import Xlib.X
 
-WALLPAPER = "/home/yom/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg"
+WALLPAPER = os.path.expanduser("~/GNUstep/Library/WindowMaker/Backgrounds/wallpaper.jpg")
 TILE_H = 32  # stay under X11 request size limit per put_image call
 
 def get_monitors():

@@ -1,0 +1,4 @@
+# Allow the dotfiles user to run gpclient connect/disconnect without a password prompt.
+# USERNAME is replaced by install.sh with the actual login name.
+USERNAME ALL=(root) NOPASSWD: /usr/bin/gpclient
+USERNAME ALL=(root) NOPASSWD: /usr/bin/pkill

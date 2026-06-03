@@ -1,0 +1,12 @@
+[Unit]
+Description=Bluetooth device connection notifications
+After=graphical-session.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+ExecStart=/usr/local/bin/bt-device-notify
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

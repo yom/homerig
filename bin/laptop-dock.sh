@@ -34,7 +34,7 @@ readonly LOCKFILE="/tmp/laptop-dock-$(whoami).lock"
 readonly LOGFILE="/tmp/laptop-dock-$(whoami).log"
 readonly USER_HOME="${HOME:-/home/$(whoami)}"
 readonly PRIMARY_DISPLAY="${PRIMARY_DISPLAY:-eDP-1}"
-readonly AUDIO_CARD="${AUDIO_CARD:-alsa_card.pci-0000_00_1f.3}"
+readonly AUDIO_CARD="${AUDIO_CARD:-}"
 
 
 # Runtime configuration
@@ -553,6 +553,11 @@ is_hdmi_audio_available() {
 
 switch_audio() {
     log_debug "Configuring audio output"
+
+    if [[ -z "$AUDIO_CARD" ]]; then
+        log_warn "switch_audio: AUDIO_CARD not set in ~/.config/dotfiles/local.env, skipping audio configuration"
+        return 0
+    fi
 
     local audio_user
     if ! audio_user=$(detect_audio_user); then

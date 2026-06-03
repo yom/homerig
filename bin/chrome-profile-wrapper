@@ -1,2 +1,8 @@
 #!/bin/bash
-sudo -u yom DISPLAY="${DISPLAY:-:0}" XAUTHORITY="/home/yom/.Xauthority" /usr/bin/google-chrome --profile-directory=Default --no-sandbox "$1" &
+# Invoked from a udev-triggered context (run as root), so we derive the desktop
+# user from SUDO_USER. --no-sandbox is required because udev provides no display
+# server sandbox.
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME=$(eval echo "~$TARGET_USER")
+sudo -u "$TARGET_USER" DISPLAY="${DISPLAY:-:0}" XAUTHORITY="$TARGET_HOME/.Xauthority" \
+    /usr/bin/google-chrome --profile-directory=Default --no-sandbox "$1" &

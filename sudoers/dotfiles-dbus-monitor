@@ -1,0 +1,4 @@
+# Allow the dotfiles user to monitor system D-Bus without a password prompt.
+# Used by bt-device-notify to watch BlueZ signals.
+# USERNAME is replaced by install.sh with the actual login name.
+USERNAME ALL=(root) NOPASSWD: /usr/bin/dbus-monitor

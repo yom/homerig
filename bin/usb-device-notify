@@ -10,11 +10,12 @@ NOTIFICATION_ID=800
 NOTIFICATION_TIMEOUT=3000
 VERBOSE=false
 
-# Audio device configuration
-DAC_VENDOR_ID="262a"
-DAC_PRODUCT_ID="12c0"
-DAC_SINK_NAME="alsa_output.usb-Audiophonics_Audiophonics_U-SABRE_A_-01.analog-stereo"
-SYSTEM_SINK_NAME="alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.pro-output-0"
+# Audio device configuration — set these in ~/.config/dotfiles/local.env
+# Run 'lsusb' for vendor/product IDs, 'pactl list sinks short' for sink names.
+DAC_VENDOR_ID="${DAC_VENDOR_ID:-}"
+DAC_PRODUCT_ID="${DAC_PRODUCT_ID:-}"
+DAC_SINK_NAME="${DAC_SINK_NAME:-}"
+SYSTEM_SINK_NAME="${SYSTEM_SINK_NAME:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do

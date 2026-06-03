@@ -15,3 +15,6 @@ vpn-widget
 
 # OS cruft
 .DS_Store
+
+# Claude Code local settings (machine-specific, may contain absolute paths)
+.claude/

@@ -1,9 +1,10 @@
 # Generic USB device notification system
 # Triggers on any USB device connection/disconnection
+# Note: DOTFILES_PATH is replaced by install.sh with the actual repo path.
 
 # Generic USB device events
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
-    RUN+="/bin/bash -c 'sleep 1; /home/yom/git/dotfiles/usb-device-notify add'"
+    RUN+="/bin/bash -c 'sleep 1; /DOTFILES_PATH/usb-device-notify add'"
 
 ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
-    RUN+="/home/yom/git/dotfiles/usb-device-notify remove"
+    RUN+="/DOTFILES_PATH/usb-device-notify remove"

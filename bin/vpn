@@ -22,7 +22,8 @@ if [[ -z "${VPN_GATEWAY:-}" || -z "${VPN_GROUP:-}" ]]; then
 fi
 
 if /usr/bin/pgrep -x "gpclient" > /dev/null; then
-    sudo gpclient disconnect
+    timeout 10 sudo gpclient disconnect
+    ip link show tun0 &>/dev/null && sudo /usr/bin/ip route flush dev tun0 2>/dev/null || true
     _update_idesk_icon vpn-off.png
     dunstify -i "network-vpn-disconnected" "VPN disconnected 🔓"
 else

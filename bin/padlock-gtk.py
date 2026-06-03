@@ -214,7 +214,7 @@ def main():
     if not args.lock_cmd and not args.unlock_cmd:
         print("Error: At least one of --lock-cmd or --unlock-cmd must be specified")
         print("\nExample usage:")
-        print("  padlock-gtk.py --lock-cmd 'globalconnect' --unlock-cmd 'pkill globalconnect'")
+        print("  padlock-gtk.py --lock-cmd 'your-vpn-client' --unlock-cmd 'pkill your-vpn-client'")
         sys.exit(1)
 
     # Create and show the padlock toggle

@@ -108,7 +108,7 @@ if [[ -f "$HOME/.config/dotfiles/local.env" ]]; then
 else
     cp "$REPO_DIR/local.env.example" "$HOME/.config/dotfiles/local.env"
     done_ "Created ~/.config/dotfiles/local.env from template"
-    warn "→ Edit ~/.config/dotfiles/local.env and set VPN_GATEWAY and VPN_GROUP."
+    warn "→ Edit ~/.config/dotfiles/local.env and fill in VPN_GATEWAY, VPN_GROUP, DAC_VENDOR_ID, DAC_PRODUCT_ID, DAC_SINK_NAME, SYSTEM_SINK_NAME, and AUDIO_CARD."
 fi
 
 # ── Step 5: iDesk setup ─────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ vpn_lnk_dst="$HOME/.idesktop/vpn.lnk"
 if [[ -f "$vpn_lnk_dst" && "$FORCE" != "--force" ]]; then
     warn "$vpn_lnk_dst already exists. Skipping. Use --force to overwrite."
 else
-    sed "s|/home/yom|$HOME|g" "$REPO_DIR/idesk/vpn.lnk" > "$vpn_lnk_dst"
+    sed "s|HOME_DIR|$HOME|g" "$REPO_DIR/idesk/vpn.lnk" > "$vpn_lnk_dst"
     done_ "Installed $vpn_lnk_dst"
 fi
 
@@ -165,8 +165,30 @@ echo "  # Install scripts to /usr/local/bin:"
 echo "  sudo cp $REPO_DIR/bin/* /usr/local/bin/"
 echo "  sudo chmod +x $(ls "$REPO_DIR/bin/" | sed "s|^|/usr/local/bin/|" | tr '\n' ' ')"
 echo ""
-echo "  # Install udev rules:"
-echo "  sudo cp $REPO_DIR/udev/*.rules /etc/udev/rules.d/"
+echo "  # Install udev rules (paths are expanded from templates):"
+for rule in "$REPO_DIR"/udev/*.rules; do
+    rule_name="$(basename "$rule")"
+    echo "  sudo sed 's|DOTFILES_PATH|$REPO_DIR/bin|g' $rule > /etc/udev/rules.d/$rule_name" | sed "s|\$REPO_DIR|$REPO_DIR|g"
+done
 echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
+echo ""
+echo "  # Install and enable systemd user services:"
+echo "  mkdir -p ~/.config/systemd/user"
+for svc in "$REPO_DIR"/systemd/*.service; do
+    svc_name="$(basename "$svc")"
+    echo "  cp $svc ~/.config/systemd/user/$svc_name"
+    echo "  systemctl --user enable --now $svc_name"
+done
+echo ""
+echo "  # Install sudoers snippets (validated before install):"
+for snippet in "$REPO_DIR"/sudoers/*; do
+    snippet_name="$(basename "$snippet")"
+    dest="/etc/sudoers.d/$snippet_name"
+    tmp="/tmp/$snippet_name.sudoers.tmp"
+    echo "  sed 's/USERNAME/$(whoami)/g' $snippet > $tmp \\"
+    echo "    && visudo -c -f $tmp \\"
+    echo "    && sudo install -m 0440 $tmp $dest \\"
+    echo "    && rm $tmp"
+done
 echo ""
 echo "══════════════════════════════════════════════════════════"

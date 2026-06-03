@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# bt-device-notify - Bluetooth device connection notifications
+#
+# Runs as a systemd user service. Monitors BlueZ D-Bus signals for the
+# configured device and fires dunstify notifications on connect/disconnect.
+#
+
+NOTIFICATION_ID=801
+NOTIFICATION_TIMEOUT=3000
+
+LOCAL_ENV="$HOME/.config/dotfiles/local.env"
+# shellcheck disable=SC1090
+[[ -f "$LOCAL_ENV" ]] && source "$LOCAL_ENV" 2>/dev/null
+
+BT_PIXEL_BUDS_MAC="${BT_PIXEL_BUDS_MAC:-AC:3E:B1:8E:4C:75}"
+MAC_PATH="dev_${BT_PIXEL_BUDS_MAC//:/_}"
+
+in_our_signal=false
+prev_line=""
+
+dbus-monitor --system \
+    "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'" \
+    2>/dev/null \
+| while IFS= read -r line; do
+    # New signal — check if it's for our device
+    if [[ "$line" == signal* ]]; then
+        if [[ "$line" == *"$MAC_PATH"* ]]; then
+            in_our_signal=true
+        else
+            in_our_signal=false
+        fi
+    fi
+
+    if [[ "$in_our_signal" == true ]]; then
+        if [[ "$prev_line" == *'"Connected"'* ]]; then
+            if [[ "$line" == *"boolean true"* || "$line" == *"boolean false"* ]]; then
+                if [[ "$line" == *"boolean true"* ]]; then
+                    dunstify -r "$NOTIFICATION_ID" -i bluetooth \
+                        -t "$NOTIFICATION_TIMEOUT" \
+                        "Pixel Buds Connected" "Pixel Buds Pro"
+                else
+                    dunstify -r "$NOTIFICATION_ID" -i bluetooth \
+                        -t "$NOTIFICATION_TIMEOUT" \
+                        "Pixel Buds Disconnected" "Pixel Buds Pro"
+                fi
+                bash "$HOME/.config/pbwidget/scripts/notify.sh" 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    prev_line="$line"
+done

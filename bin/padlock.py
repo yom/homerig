@@ -181,7 +181,7 @@ def main():
     if not args.lock_cmd and not args.unlock_cmd:
         print("Error: At least one of --lock-cmd or --unlock-cmd must be specified")
         print("\nExample usage:")
-        print("  padlock.py --lock-cmd 'globalconnect' --unlock-cmd 'pkill globalconnect'")
+        print("  padlock.py --lock-cmd 'your-vpn-client' --unlock-cmd 'pkill your-vpn-client'")
         sys.exit(1)
 
     app = QApplication(sys.argv)
