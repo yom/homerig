@@ -571,24 +571,19 @@ def render(data, cfg):
             cx = (W / 3) * i + (W / 3) / 2
             _draw_unknown_gauge(ctx, cx, cy, radius, thickness, label, ring_rgba, text_rgba)
 
-    # Summary line: "Left: NN%   Case: NN%   Right: NN%"
+    # One label per visible gauge, centred on that gauge's cx
     label_map = {"left": "Left", "case": "Case", "right": "Right"}
-    parts = []
-    for key, _ in GAUGE_LABELS:
-        pct = data.get(key, -1)
-        parts.append(f"{label_map[key]}: {pct}%" if pct >= 0 else f"{label_map[key]}: —")
-    summary_text = "   ".join(parts)
     ctx.set_source_rgba(*text_rgba)
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    summary_font = max(7, cell * 0.11)
-    ctx.set_font_size(summary_font)
-    while ctx.text_extents(summary_text).width > W * 0.92 and summary_font > 7:
-        summary_font -= 0.5
-        ctx.set_font_size(summary_font)
-    ext_s = ctx.text_extents(summary_text)
+    ctx.set_font_size(max(7, cell * 0.11))
     summary_y = title_h + cell + summary_h * 0.55
-    ctx.move_to(W / 2 - ext_s.width / 2 - ext_s.x_bearing, summary_y - ext_s.y_bearing)
-    ctx.show_text(summary_text)
+    for i, (key, _) in enumerate(visible):
+        pct = data.get(key, -1)
+        lbl = f"{label_map[key]}: {pct}%"
+        cx  = pos_w * i + pos_w / 2
+        ext_s = ctx.text_extents(lbl)
+        ctx.move_to(cx - ext_s.width / 2 - ext_s.x_bearing, summary_y - ext_s.y_bearing)
+        ctx.show_text(lbl)
 
     sep_y = title_h + cell + summary_h + anc_h * 0.04
     ctx.set_source_rgba(*(*text_rgba[:3], 0.15))
