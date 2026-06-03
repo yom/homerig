@@ -469,8 +469,17 @@ def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba,
         return
     cell = W // n
     icon_r = anc_h * 0.28
-    label_font = max(6, anc_h * 0.14)
     icon_cy = anc_y + anc_h * 0.42
+    max_w = cell * 0.92
+
+    # Pick a font size where the longest label fits in bold on one line
+    label_font = max(6, anc_h * 0.14)
+    longest = max(modes, key=lambda m: len(m[1]))[1]
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(label_font)
+    while ctx.text_extents(longest).width > max_w and label_font > 6:
+        label_font -= 0.5
+        ctx.set_font_size(label_font)
 
     for i, (mode_key, mode_label) in enumerate(modes):
         cx = cell * i + cell / 2
@@ -482,20 +491,7 @@ def draw_anc_row(ctx, W, anc_y, anc_h, active_key, accent_rgba, text_rgba,
                              cairo.FONT_WEIGHT_BOLD if mode_key == active_key
                              else cairo.FONT_WEIGHT_NORMAL)
         ctx.set_font_size(label_font)
-
-        words = mode_label.split()
-        lines, cur = [], ""
-        max_w = cell * 0.92
-        for word in words:
-            test = (cur + " " + word).strip()
-            if ctx.text_extents(test).width <= max_w:
-                cur = test
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = word
-        if cur:
-            lines.append(cur)
+        lines = [mode_label]
 
         label_y = icon_cy + icon_r + anc_h * 0.10
         line_h = label_font * 1.3
