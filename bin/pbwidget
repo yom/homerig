@@ -228,7 +228,7 @@ def _battery_icon_name(pct, charging):
     return f"battery-level-{level}-symbolic"
 
 
-def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_rgba):
+def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color, bg_rgba):
     icon_name = _battery_icon_name(pct, charging)
     handle = _get_icon_handle(icon_name, icon_theme)
     if handle is None:
@@ -239,12 +239,23 @@ def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_rgba)
     svg_w = vb.width if vb.width > 0 else 16.0
     svg_h = vb.height if vb.height > 0 else 16.0
 
-    # Fit icon inside the gap: width = chord of the gap at the ring radius
     gap_chord = 2 * radius * math.sin(GAP / 2)
     icon_size = gap_chord * 0.36
-    px = max(1, int(icon_size * svg_w / svg_h))  # preserve aspect ratio
-    py = max(1, int(icon_size))
+    circle_r  = icon_size * 0.72
 
+    icon_cx = cx
+    icon_cy = cy - radius
+
+    # Filled circle in arc color
+    ctx.save()
+    ctx.set_source_rgba(*arc_color)
+    ctx.arc(icon_cx, icon_cy, circle_r, 0, 2 * math.pi)
+    ctx.fill()
+    ctx.restore()
+
+    # Render SVG at icon size
+    px = max(1, int(icon_size * svg_w / svg_h))
+    py = max(1, int(icon_size))
     tmp = cairo.ImageSurface(cairo.FORMAT_ARGB32, px, py)
     tmp_ctx = cairo.Context(tmp)
     viewport = Rsvg.Rectangle()
@@ -252,16 +263,15 @@ def draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_rgba)
     tmp_ctx.scale(px / svg_w, py / svg_h)
     handle.render_document(tmp_ctx, viewport)
 
-    # Tint with text color
-    r_col, g_col, b_col, a_col = text_rgba
+    # Tint icon with bg color so it reads as inverted against the circle
     ctx.save()
-    ctx.set_source_rgba(r_col, g_col, b_col, a_col)
-    ctx.mask_surface(tmp, cx - px / 2, cy - radius - py / 2)
+    ctx.set_source_rgba(*bg_rgba)
+    ctx.mask_surface(tmp, icon_cx - px / 2, icon_cy - py / 2)
     ctx.restore()
 
 
 def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
-               accent, ring, text_color, sprite_surface, manifest, charging,
+               accent, ring, text_color, bg_rgba, sprite_surface, manifest, charging,
                icon_theme="Yaru", battery_warn=50, battery_critical=10):
     ctx.set_line_cap(cairo.LINE_CAP_ROUND)
     ctx.set_line_width(thickness)
@@ -274,16 +284,17 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.arc(cx, cy, radius, ring_start, ring_end)
     ctx.stroke()
 
+    if pct < battery_critical:
+        arc_color = (0.90, 0.20, 0.20, 1.0)   # red
+    elif pct < battery_warn:
+        arc_color = (0.95, 0.75, 0.10, 1.0)   # yellow
+    else:
+        arc_color = (0.30, 0.80, 0.35, 1.0)   # green
+
     if pct > 0:
-        arc_span = (2 * math.pi - GAP)  # usable arc length
+        arc_span = (2 * math.pi - GAP)
         start = ring_start
         end = start + (pct / 100) * arc_span
-        if pct < battery_critical:
-            arc_color = (0.90, 0.20, 0.20, 1.0)   # red
-        elif pct < battery_warn:
-            arc_color = (0.95, 0.75, 0.10, 1.0)   # yellow
-        else:
-            arc_color = (0.30, 0.80, 0.35, 1.0)   # green
         ctx.set_source_rgba(*arc_color)
         ctx.new_sub_path()
         ctx.arc(cx, cy, radius, start, end)
@@ -311,7 +322,7 @@ def draw_gauge(ctx, cx, cy, radius, thickness, pct, key, label,
     ctx.move_to(cx - ext2.width / 2 - ext2.x_bearing, pct_y - ext2.y_bearing)
     ctx.show_text(pct_text)
 
-    draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, text_color)
+    draw_battery_icon(ctx, cx, cy, radius, pct, charging, icon_theme, arc_color, bg_rgba)
 
 
 def draw_ear(ctx, cx, cy, r, icon_theme="Yaru"):
@@ -494,12 +505,13 @@ def render(data, cfg):
     accent_rgba  = hex_to_rgba(accent)
     ring_rgba    = hex_to_rgba(ring)
     text_rgba    = hex_to_rgba(text)
+    bg_rgba      = hex_to_rgba(bg)
     sprite_surface, manifest = load_sprites(cfg["SPRITES_DIR"])
 
     for i, (key, label) in enumerate(GAUGE_LABELS):
         cx = cell * i + cell / 2
         draw_gauge(ctx, cx, cy, radius, thickness, data.get(key, -1), key, label,
-                   accent_rgba, ring_rgba, text_rgba, sprite_surface, manifest,
+                   accent_rgba, ring_rgba, text_rgba, bg_rgba, sprite_surface, manifest,
                    data.get(f"{key}_charging", False), cfg["ICON_THEME"],
                    cfg["BATTERY_WARN"], cfg["BATTERY_CRITICAL"])
 
