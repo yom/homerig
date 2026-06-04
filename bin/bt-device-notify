@@ -40,6 +40,29 @@ dbus-monitor --system \
                         dunstify -r "$NOTIFICATION_ID" -i bluetooth \
                             -t "$NOTIFICATION_TIMEOUT" \
                             "Pixel Buds Connected" "Pixel Buds Pro"
+                    # Background: ensure BT audio is routed; self-heal if WirePlumber failed
+                    {
+                        _mac_under="${BT_PIXEL_BUDS_MAC//:/_}"
+                        for _i in $(seq 1 15); do
+                            pactl list sinks short 2>/dev/null \
+                                | grep -q "bluez_output.${_mac_under}" && break
+                            sleep 0.5
+                        done
+                        if ! pactl list sinks short 2>/dev/null \
+                                | grep -q "bluez_output.${_mac_under}"; then
+                            dunstify -r "$NOTIFICATION_ID" --appname "pbwidget" \
+                                -i bluetooth-active -t "$NOTIFICATION_TIMEOUT" \
+                                "Audio routing failed" "Restarting WirePlumber…"
+                            systemctl --user restart wireplumber
+                            sleep 2
+                        fi
+                        _sink=$(pactl list sinks short 2>/dev/null \
+                                | awk "/bluez_output\.${_mac_under}/{print \$2}" | head -1)
+                        _card=$(pactl list cards short 2>/dev/null \
+                                | awk "/bluez_card\.${_mac_under}/{print \$2}" | head -1)
+                        [[ -n "$_card" ]] && pactl set-card-profile "$_card" a2dp-sink 2>/dev/null
+                        [[ -n "$_sink" ]] && pactl set-default-sink "$_sink" 2>/dev/null
+                    } &
                 else
                     /usr/local/bin/pbwidget --disconnected 2>/dev/null || \
                         dunstify -r "$NOTIFICATION_ID" \
