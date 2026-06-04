@@ -1,5 +1,5 @@
 [Unit]
-Description=Pixel Buds Pro daemon
+Description=Pixel Buds daemon
 After=graphical-session.target bluetooth.target
 Wants=bluetooth.target
 

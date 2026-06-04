@@ -672,7 +672,7 @@ def main():
         if anc_supported:
             cfg["_ANC_SUPPORTED"] = anc_supported
         else:
-            cfg["_ANC_SUPPORTED"] = _ALL_ANC_MODES - {"adaptive"}  # safe default for Pro 1
+            cfg["_ANC_SUPPORTED"] = _ALL_ANC_MODES - {"adaptive"}  # safe default: Adaptive is only on some models
 
     render(data, cfg)
     notify(cfg)
