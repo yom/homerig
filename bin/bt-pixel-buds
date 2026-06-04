@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pixel Buds Pro daemon.
+"""Pixel Buds daemon.
 
 Keeps RFCOMM channel 2 open and:
   - fires the battery/ANC widget on connect
@@ -20,10 +20,16 @@ import time
 
 RFCOMM_CH       = 2
 RECONNECT_DELAY = 5
-ANC_STATE_FILE  = "/tmp/pbwidget-anc"
 NOTIFICATION_ID = "801"
 NOTIFICATION_TO = "3000"
 ANC_STATES = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
+
+_RUNTIME_DIR    = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+    "pbwidget"
+)
+ANC_STATE_FILE     = os.path.join(_RUNTIME_DIR, "anc")
+BATTERY_STATE_FILE = os.path.join(_RUNTIME_DIR, "battery")
 
 _KV_RE = re.compile(r'^([A-Z_][A-Z0-9_]*)=(.+?)(?:\s+#.*)?$')
 
@@ -95,6 +101,17 @@ def _write_anc_state(state, supported):
         f.write(state + "\n" + ",".join(supported))
 
 
+def _decode_battery_byte(b):
+    return (-1 if (b & 0x7f) == 0x7f else (b & 0x7f)), bool(b >> 7)
+
+
+def _write_battery_state(left, left_chg, right, right_chg, case, case_chg):
+    with open(BATTERY_STATE_FILE, "w") as f:
+        f.write(f"left={left}\nleft_charging={str(left_chg).lower()}\n"
+                f"right={right}\nright_charging={str(right_chg).lower()}\n"
+                f"case={case}\ncase_charging={str(case_chg).lower()}\n")
+
+
 # ── Widget triggers ───────────────────────────────────────────────────────────
 
 def _trigger_widget():
@@ -155,6 +172,7 @@ def _heal_audio(mac):
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run(mac, debug=False):
+    os.makedirs(_RUNTIME_DIR, exist_ok=True)
     last_state     = None
     last_placement = None
     was_connected  = False   # guards disconnect notification against startup failures
@@ -189,7 +207,13 @@ def run(mac, debug=False):
                         _trigger_widget()
 
                 elif g == 0x03 and c == 0x03 and len(p) == 3:
-                    placement = (p[1] == 0x7f, p[2] == 0x7f)
+                    case_pct,  case_chg  = _decode_battery_byte(p[0])
+                    left_pct,  left_chg  = _decode_battery_byte(p[1])
+                    right_pct, right_chg = _decode_battery_byte(p[2])
+                    _write_battery_state(left_pct, left_chg, right_pct, right_chg,
+                                         case_pct, case_chg)
+
+                    placement = (left_pct == -1, right_pct == -1)
                     if placement != last_placement:
                         last_placement = placement
                         left_s  = "in case" if placement[0] else "out"

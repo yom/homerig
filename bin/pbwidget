@@ -17,8 +17,13 @@ from gi.repository import Rsvg
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-OUTPUT_PATH    = "/tmp/pbwidget.png"
-ANC_STATE_FILE = "/tmp/pbwidget-anc"   # written by bt-pixel-buds-anc daemon
+_RUNTIME_DIR   = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+    "pbwidget"
+)
+OUTPUT_PATH        = os.path.join(_RUNTIME_DIR, "widget.png")
+ANC_STATE_FILE     = os.path.join(_RUNTIME_DIR, "anc")
+BATTERY_STATE_FILE = os.path.join(_RUNTIME_DIR, "battery")
 RFCOMM_CH      = 2
 ANC_STATES     = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
 GAUGE_LABELS  = [("left", "L"), ("case", "C"), ("right", "R")]
@@ -102,6 +107,22 @@ def _lookup_device_name(device_mac):
         pass
     return ""
 
+def _read_battery_state():
+    try:
+        with open(BATTERY_STATE_FILE) as f:
+            kv = {k: v for k, _, v in (l.strip().partition("=") for l in f) if k}
+        return {
+            "left":           int(kv.get("left", -1)),
+            "left_charging":  kv.get("left_charging") == "true",
+            "right":          int(kv.get("right", -1)),
+            "right_charging": kv.get("right_charging") == "true",
+            "case":           int(kv.get("case", -1)),
+            "case_charging":  kv.get("case_charging") == "true",
+        }
+    except (OSError, ValueError):
+        return None
+
+
 def _extract_pct(line):
     m = re.search(r':\s*(\d+)%', line)
     return int(m.group(1)) if m else -1
@@ -110,29 +131,33 @@ def _extract_charging(line):
     return "(charging)" in line and "(not charging)" not in line
 
 def query_battery(device_mac):
-    pbpctrl = os.path.expanduser("~/.cargo/bin/pbpctrl")
     data = {"left": -1, "case": -1, "right": -1,
             "left_charging": False, "case_charging": False, "right_charging": False,
             "device_name": "", "anc": "unknown"}
-    try:
-        out = subprocess.check_output([pbpctrl, "show", "battery"],
-                                      stderr=subprocess.DEVNULL, text=True)
-    except Exception:
-        return data
 
-    for line in out.splitlines():
-        if line.startswith("left bud:"):
-            data["left"] = _extract_pct(line)
-            data["left_charging"] = _extract_charging(line)
-        elif line.startswith("right bud:"):
-            data["right"] = _extract_pct(line)
-            data["right_charging"] = _extract_charging(line)
-        elif line.startswith("case:"):
-            data["case"] = _extract_pct(line)
-            data["case_charging"] = _extract_charging(line)
+    battery = _read_battery_state()
+    if battery:
+        data.update(battery)
+    else:
+        # Fallback: call pbpctrl if the daemon isn't running
+        pbpctrl = os.path.expanduser("~/.cargo/bin/pbpctrl")
+        try:
+            out = subprocess.check_output([pbpctrl, "show", "battery"],
+                                          stderr=subprocess.DEVNULL, text=True)
+            for line in out.splitlines():
+                if line.startswith("left bud:"):
+                    data["left"] = _extract_pct(line)
+                    data["left_charging"] = _extract_charging(line)
+                elif line.startswith("right bud:"):
+                    data["right"] = _extract_pct(line)
+                    data["right_charging"] = _extract_charging(line)
+                elif line.startswith("case:"):
+                    data["case"] = _extract_pct(line)
+                    data["case_charging"] = _extract_charging(line)
+        except Exception:
+            pass
 
     data["device_name"] = _lookup_device_name(device_mac)
-
     return data
 
 # ── ANC query ─────────────────────────────────────────────────────────────────
@@ -646,6 +671,7 @@ def render_disconnected(cfg):
 
 
 def main():
+    os.makedirs(_RUNTIME_DIR, exist_ok=True)
     disconnected = "--disconnected" in sys.argv
     cfg  = load_config()
 
