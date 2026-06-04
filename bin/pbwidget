@@ -5,11 +5,8 @@ import json
 import math
 import os
 import re
-import socket
-import struct
 import subprocess
 import sys
-import tempfile
 import cairo
 import gi
 gi.require_version('Rsvg', '2.0')
@@ -24,8 +21,6 @@ _RUNTIME_DIR   = os.path.join(
 OUTPUT_PATH        = os.path.join(_RUNTIME_DIR, "widget.png")
 ANC_STATE_FILE     = os.path.join(_RUNTIME_DIR, "anc")
 BATTERY_STATE_FILE = os.path.join(_RUNTIME_DIR, "battery")
-RFCOMM_CH      = 2
-ANC_STATES     = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
 GAUGE_LABELS  = [("left", "L"), ("case", "C"), ("right", "R")]
 ANC_MODES     = [
     ("noise_cancellation", "Noise cancellation"),
@@ -123,67 +118,21 @@ def _read_battery_state():
         return None
 
 
-def _extract_pct(line):
-    m = re.search(r':\s*(\d+)%', line)
-    return int(m.group(1)) if m else -1
-
-def _extract_charging(line):
-    return "(charging)" in line and "(not charging)" not in line
-
 def query_battery(device_mac):
     data = {"left": -1, "case": -1, "right": -1,
             "left_charging": False, "case_charging": False, "right_charging": False,
             "device_name": "", "anc": "unknown"}
-
     battery = _read_battery_state()
     if battery:
         data.update(battery)
-    else:
-        # Fallback: call pbpctrl if the daemon isn't running
-        pbpctrl = os.path.expanduser("~/.cargo/bin/pbpctrl")
-        try:
-            out = subprocess.check_output([pbpctrl, "show", "battery"],
-                                          stderr=subprocess.DEVNULL, text=True)
-            for line in out.splitlines():
-                if line.startswith("left bud:"):
-                    data["left"] = _extract_pct(line)
-                    data["left_charging"] = _extract_charging(line)
-                elif line.startswith("right bud:"):
-                    data["right"] = _extract_pct(line)
-                    data["right_charging"] = _extract_charging(line)
-                elif line.startswith("case:"):
-                    data["case"] = _extract_pct(line)
-                    data["case_charging"] = _extract_charging(line)
-        except Exception:
-            pass
-
     data["device_name"] = _lookup_device_name(device_mac)
     return data
 
 # ── ANC query ─────────────────────────────────────────────────────────────────
 
-def _read_rfcomm_msg(sock):
-    h = b""
-    while len(h) < 4:
-        chunk = sock.recv(4 - len(h))
-        if not chunk:
-            raise ConnectionError("closed")
-        h += chunk
-    length = struct.unpack(">H", h[2:4])[0]
-    p = b""
-    while len(p) < length:
-        chunk = sock.recv(length - len(p))
-        if not chunk:
-            raise ConnectionError("closed")
-        p += chunk
-    return h[0], h[1], p
-
 _ALL_ANC_MODES = {"noise_cancellation", "transparency", "adaptive", "off"}
 
 def query_anc(mac):
-    # Prefer the state file written by bt-pixel-buds-anc (which holds the RFCOMM
-    # connection), falling back to a direct query when the daemon isn't running.
-    # Returns (state, supported_modes_set).
     try:
         with open(ANC_STATE_FILE) as f:
             lines = f.read().strip().splitlines()
@@ -193,27 +142,6 @@ def query_anc(mac):
         if state in _ALL_ANC_MODES:
             return state, supported
     except OSError:
-        pass
-
-    try:
-        s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        s.settimeout(3)
-        s.connect((mac, RFCOMM_CH))
-        s.settimeout(0.4)
-        try:
-            while True:
-                _read_rfcomm_msg(s)
-        except (socket.timeout, ConnectionError):
-            pass
-        s.settimeout(3)
-        s.send(bytes([0x08, 0x11, 0x00, 0x00]))
-        g, c, p = _read_rfcomm_msg(s)
-        s.close()
-        if g == 0x08 and c == 0x13 and len(p) >= 4:
-            state = next((v for k, v in ANC_STATES.items() if p[3] & k), "unknown")
-            supported = {v for k, v in ANC_STATES.items() if len(p) > 1 and p[1] & k}
-            return state, supported if supported else None
-    except Exception:
         pass
     return "unknown", None
 
