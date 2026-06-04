@@ -1,10 +1,10 @@
 [Unit]
-Description=Bluetooth device connection notifications
+Description=Pixel Buds Pro daemon
 After=graphical-session.target bluetooth.target
 Wants=bluetooth.target
 
 [Service]
-ExecStart=/usr/local/bin/bt-device-notify
+ExecStart=/usr/local/bin/bt-pixel-buds
 Restart=always
 RestartSec=5
 
