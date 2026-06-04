@@ -49,12 +49,9 @@ def _parse_env_file(path):
     return result
 
 def load_config():
-    cfg = _parse_env_file("~/.config/pbwidget/config.sh")
-    env = _parse_env_file("~/.config/dotfiles/local.env")
+    cfg = _parse_env_file("~/.pbwidget")
 
-    mac = (env.get("BT_PIXEL_BUDS_MAC")
-           or cfg.get("DEVICE_MAC")
-           or "AC:3E:B1:8E:4C:75")
+    mac = cfg.get("DEVICE_MAC") or "AC:3E:B1:8E:4C:75"
 
     def _int(key, default):
         try:

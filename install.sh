@@ -111,6 +111,14 @@ else
     warn "→ Edit ~/.config/dotfiles/local.env and fill in VPN_GATEWAY, VPN_GROUP, DAC_VENDOR_ID, DAC_PRODUCT_ID, DAC_SINK_NAME, SYSTEM_SINK_NAME, and AUDIO_CARD."
 fi
 
+if [[ -f "$HOME/.pbwidget" ]]; then
+    warn "~/.pbwidget already exists. Skipping."
+else
+    cp "$REPO_DIR/pbwidget.conf.example" "$HOME/.pbwidget"
+    done_ "Created ~/.pbwidget from template"
+    warn "→ Edit ~/.pbwidget and set DEVICE_MAC to your Pixel Buds MAC address."
+fi
+
 # ── Step 5: iDesk setup ─────────────────────────────────────────────────────
 info "Setting up iDesk..."
 

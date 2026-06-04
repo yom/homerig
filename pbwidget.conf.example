@@ -1,0 +1,15 @@
+# Pixel Buds widget configuration — copy to ~/.pbwidget and edit.
+
+DEVICE_MAC="AC:3E:B1:8E:4C:75"   # Bluetooth MAC; run 'bluetoothctl devices'
+
+BG_COLOR="#1e1e2e"                # gauge background
+TEXT_COLOR="#cdd6f4"              # text and labels
+ACCENT_COLOR="#89b4fa"            # active ANC mode highlight
+RING_COLOR="#ffffff20"            # gauge track (8-digit hex = with alpha)
+OPACITY=0.0                       # PNG background opacity (0=transparent)
+AUTO_CLOSE=5000                   # ms until dunst dismisses (0=sticky)
+IMAGE_SIZE=300                    # PNG width in px
+ICON_THEME="Yaru"                 # icon theme for battery and ear icons
+BATTERY_WARN=50                   # arc turns yellow below this %
+BATTERY_CRITICAL=10               # arc turns red below this %
+ANC_ADAPTIVE=auto                 # auto/true/false — show Adaptive ANC mode

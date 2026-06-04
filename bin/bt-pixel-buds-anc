@@ -22,18 +22,17 @@ ANC_STATES = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_
 _KV_RE = re.compile(r'^([A-Z_][A-Z0-9_]*)=(.+?)(?:\s+#.*)?$')
 
 def _load_mac():
-    for path in ("~/.config/dotfiles/local.env", "~/.config/pbwidget/config.sh"):
-        try:
-            with open(os.path.expanduser(path)) as f:
-                for line in f:
-                    m = _KV_RE.match(line.strip())
-                    if m:
-                        key = m.group(1)
-                        val = m.group(2).strip('"\'').strip()
-                        if key in ("BT_PIXEL_BUDS_MAC", "DEVICE_MAC") and val:
-                            return val
-        except OSError:
-            pass
+    try:
+        with open(os.path.expanduser("~/.pbwidget")) as f:
+            for line in f:
+                m = _KV_RE.match(line.strip())
+                if m:
+                    key = m.group(1)
+                    val = m.group(2).strip('"\'').strip()
+                    if key == "DEVICE_MAC" and val:
+                        return val
+    except OSError:
+        pass
     return "AC:3E:B1:8E:4C:75"
 
 

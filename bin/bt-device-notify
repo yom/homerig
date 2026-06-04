@@ -9,12 +9,11 @@
 NOTIFICATION_ID=801
 NOTIFICATION_TIMEOUT=3000
 
-LOCAL_ENV="$HOME/.config/dotfiles/local.env"
 # shellcheck disable=SC1090
-[[ -f "$LOCAL_ENV" ]] && source "$LOCAL_ENV" 2>/dev/null
+[[ -f "$HOME/.pbwidget" ]] && source "$HOME/.pbwidget" 2>/dev/null
 
-BT_PIXEL_BUDS_MAC="${BT_PIXEL_BUDS_MAC:-AC:3E:B1:8E:4C:75}"
-MAC_PATH="dev_${BT_PIXEL_BUDS_MAC//:/_}"
+DEVICE_MAC="${DEVICE_MAC:-AC:3E:B1:8E:4C:75}"
+MAC_PATH="dev_${DEVICE_MAC//:/_}"
 
 in_our_signal=false
 prev_line=""
@@ -42,7 +41,7 @@ dbus-monitor --system \
                             "Pixel Buds Connected" "Pixel Buds Pro"
                     # Background: ensure BT audio is routed; self-heal if WirePlumber failed
                     {
-                        _mac_under="${BT_PIXEL_BUDS_MAC//:/_}"
+                        _mac_under="${DEVICE_MAC//:/_}"
                         for _i in $(seq 1 15); do
                             pactl list sinks short 2>/dev/null \
                                 | grep -q "bluez_output.${_mac_under}" && break
