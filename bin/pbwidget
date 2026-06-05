@@ -52,7 +52,10 @@ def _parse_env_file(path):
 def load_config():
     cfg = _parse_env_file("~/.pbwidget")
 
-    mac = cfg.get("DEVICE_MAC") or "AC:3E:B1:8E:4C:75"
+    mac = cfg.get("DEVICE_MAC") or ""
+    if not mac:
+        print("pbwidget: DEVICE_MAC not set in ~/.pbwidget — run 'bluetoothctl devices' to find your MAC", file=sys.stderr)
+        sys.exit(1)
 
     def _int(key, default):
         try:

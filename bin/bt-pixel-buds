@@ -67,7 +67,8 @@ def _load_mac():
                         return val
     except OSError:
         pass
-    return "AC:3E:B1:8E:4C:75"
+    print("bt-pixel-buds: DEVICE_MAC not set in ~/.pbwidget — run 'bluetoothctl devices' to find your MAC", flush=True)
+    sys.exit(1)
 
 
 # ── RFCOMM helpers ────────────────────────────────────────────────────────────
