@@ -1,6 +1,12 @@
-# Pixel Buds widget configuration — copy to ~/.pbwidget and edit.
+# pbwidget configuration — copy to ~/.pbwidget and edit.
+# This file configures the display widget only. The monitor daemon (pbwatch)
+# is configured via its --mac and --on-update CLI flags in the systemd service.
 
-DEVICE_MAC=""                     # Bluetooth MAC; run 'bluetoothctl devices'
+# Optional: Bluetooth MAC of your buds. Used only to look up the device name
+# via BlueZ for the widget title. If unset, no title is shown unless DEVICE_LABEL is set.
+# Run 'bluetoothctl devices' to find your MAC.
+# DEVICE_MAC=""
+
 DEVICE_LABEL=""                   # Label shown at the top of the widget.
                                   # Leave empty to use the Bluetooth device name (Device.Alias).
                                   # Example: DEVICE_LABEL="Pixel Buds"

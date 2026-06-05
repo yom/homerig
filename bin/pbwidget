@@ -15,13 +15,17 @@ from gi.repository import Rsvg
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_RUNTIME_DIR   = os.path.join(
+_RUNTIME_DIR        = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
     "pbwidget"
 )
+_PBWATCH_STATE_DIR  = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+    "pbwatch"
+)
 OUTPUT_PATH        = os.path.join(_RUNTIME_DIR, "widget.png")
-ANC_STATE_FILE     = os.path.join(_RUNTIME_DIR, "anc")
-BATTERY_STATE_FILE = os.path.join(_RUNTIME_DIR, "battery")
+ANC_STATE_FILE     = os.path.join(_PBWATCH_STATE_DIR, "anc")
+BATTERY_STATE_FILE = os.path.join(_PBWATCH_STATE_DIR, "battery")
 GAUGE_LABELS  = [("left", "L"), ("case", "C"), ("right", "R")]
 ANC_MODES     = [
     ("noise_cancellation", "Noise cancellation"),
@@ -52,10 +56,10 @@ def _parse_env_file(path):
 def load_config():
     cfg = _parse_env_file("~/.pbwidget")
 
-    mac = cfg.get("DEVICE_MAC") or ""
-    if not mac:
-        print("pbwidget: DEVICE_MAC not set in ~/.pbwidget — run 'bluetoothctl devices' to find your MAC", file=sys.stderr)
-        sys.exit(1)
+    # DEVICE_MAC is optional — used only to look up the device label via
+    # BlueZ Device1.Alias. If unset and DEVICE_LABEL is also unset, no title
+    # is shown. The MAC for monitoring is pbwatch's concern (its --mac flag).
+    mac = cfg.get("DEVICE_MAC", "")
 
     def _int(key, default):
         try:
@@ -75,7 +79,7 @@ def load_config():
         critical = max(0, warn - 1)
 
     return {
-        "DEVICE_MAC":   mac,
+        "DEVICE_MAC":   mac,  # optional; used only for Device1.Alias lookup
         "BG_COLOR":     cfg.get("BG_COLOR",    "#1e1e2e"),
         "TEXT_COLOR":   cfg.get("TEXT_COLOR",   "#cdd6f4"),
         "ACCENT_COLOR": cfg.get("ACCENT_COLOR", "#89b4fa"),
@@ -604,6 +608,7 @@ def render_disconnected(cfg):
 
 def main():
     os.makedirs(_RUNTIME_DIR, exist_ok=True)
+    os.makedirs(_PBWATCH_STATE_DIR, exist_ok=True)
     disconnected = "--disconnected" in sys.argv
     cfg  = load_config()
 
