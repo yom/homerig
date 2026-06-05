@@ -1,6 +1,9 @@
 # Pixel Buds widget configuration — copy to ~/.pbwidget and edit.
 
 DEVICE_MAC="AC:3E:B1:8E:4C:75"   # Bluetooth MAC; run 'bluetoothctl devices'
+DEVICE_LABEL=""                   # Label shown at the top of the widget.
+                                  # Leave empty to use the Bluetooth device name (Device.Alias).
+                                  # Example: DEVICE_LABEL="Pixel Buds"
 
 BG_COLOR="#1e1e2e"                # gauge background
 TEXT_COLOR="#cdd6f4"              # text and labels

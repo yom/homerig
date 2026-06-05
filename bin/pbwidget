@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import cairo
+import dbus
 import gi
 gi.require_version('Rsvg', '2.0')
 from gi.repository import Rsvg
@@ -84,23 +85,22 @@ def load_config():
         "BATTERY_WARN":      warn,
         "BATTERY_CRITICAL":  critical,
         "ANC_ADAPTIVE":      cfg.get("ANC_ADAPTIVE", "auto").lower(),
+        "DEVICE_LABEL":      cfg.get("DEVICE_LABEL", ""),
     }
 
 # ── Battery query ─────────────────────────────────────────────────────────────
 
-def _lookup_device_name(device_mac):
+def _lookup_device_name(mac, label_override=""):
+    if label_override:
+        return label_override
     try:
-        out = subprocess.check_output(["bluetoothctl", "devices"],
-                                      stderr=subprocess.DEVNULL, text=True)
-        for line in out.splitlines():
-            if device_mac and device_mac.upper() in line.upper():
-                return re.sub(r'^Device\s+\S+\s+', '', line).strip()
-        for line in out.splitlines():
-            if "pixel bud" in line.lower():
-                return re.sub(r'^Device\s+\S+\s+', '', line).strip()
-    except Exception:
-        pass
-    return ""
+        bus   = dbus.SystemBus()
+        path  = f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
+        obj   = bus.get_object("org.bluez", path)
+        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+        return str(props.Get("org.bluez.Device1", "Alias"))
+    except dbus.DBusException:
+        return ""
 
 def _read_battery_state():
     try:
@@ -118,14 +118,15 @@ def _read_battery_state():
         return None
 
 
-def query_battery(device_mac):
+def query_battery(device_mac, cfg=None):
     data = {"left": -1, "case": -1, "right": -1,
             "left_charging": False, "case_charging": False, "right_charging": False,
             "device_name": "", "anc": "unknown"}
     battery = _read_battery_state()
     if battery:
         data.update(battery)
-    data["device_name"] = _lookup_device_name(device_mac)
+    label = cfg["DEVICE_LABEL"] if cfg else ""
+    data["device_name"] = _lookup_device_name(device_mac, label)
     return data
 
 # ── ANC query ─────────────────────────────────────────────────────────────────
@@ -604,12 +605,12 @@ def main():
     cfg  = load_config()
 
     if disconnected:
-        cfg["_DEVICE_NAME"] = _lookup_device_name(cfg["DEVICE_MAC"]) or "Pixel Buds"
+        cfg["_DEVICE_NAME"] = _lookup_device_name(cfg["DEVICE_MAC"], cfg["DEVICE_LABEL"]) or "Pixel Buds"
         render_disconnected(cfg)
         notify(cfg)
         return
 
-    data = query_battery(cfg["DEVICE_MAC"])
+    data = query_battery(cfg["DEVICE_MAC"], cfg)
     anc_state, anc_supported = query_anc(cfg["DEVICE_MAC"])
     data["anc"] = anc_state
 
