@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import dbus
 
 RFCOMM_CH       = 2
 RECONNECT_DELAY = 5
@@ -33,6 +34,25 @@ ANC_STATE_FILE     = os.path.join(_RUNTIME_DIR, "anc")
 BATTERY_STATE_FILE = os.path.join(_RUNTIME_DIR, "battery")
 
 _KV_RE = re.compile(r'^([A-Z_][A-Z0-9_]*)=(.+?)(?:\s+#.*)?$')
+
+
+DORMANT_INTERVAL = 5  # seconds between BlueZ Connected checks while dormant
+
+
+def _is_bt_connected(mac):
+    try:
+        bus  = dbus.SystemBus()
+        path = f"/org/bluez/hci0/dev_{mac.replace(':', '_')}"
+        obj  = bus.get_object("org.bluez", path)
+        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+        return bool(props.Get("org.bluez.Device1", "Connected"))
+    except dbus.DBusException:
+        return False
+
+
+def _wait_for_bt_connect(mac):
+    while not _is_bt_connected(mac):
+        time.sleep(DORMANT_INTERVAL)
 
 
 def _load_mac():
@@ -209,6 +229,11 @@ def run(mac, debug=False):
     sock               = None
     print(f"bt-pixel-buds: monitoring {mac}{' [DEBUG]' if debug else ''}", flush=True)
 
+    # Start dormant if the device isn't reachable yet — avoids two pointless
+    # RFCOMM attempts before the dormant loop would kick in anyway.
+    if not _is_bt_connected(mac):
+        _wait_for_bt_connect(mac)
+
     while True:
         try:
             print("bt-pixel-buds: connecting...", flush=True)
@@ -280,6 +305,20 @@ def run(mac, debug=False):
                     last_charging = charging
 
         except Exception as e:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+            if isinstance(e, ConnectionResetError):
+                # Intentional firmware reset — the device signals state changes
+                # (bud in/out of case) by tearing down RFCOMM. Not a failure.
+                print("bt-pixel-buds: device reset (state change), reconnecting…",
+                      flush=True)
+                time.sleep(0.5)
+                continue
+
             print(f"bt-pixel-buds: {e} — retrying in {RECONNECT_DELAY}s", flush=True)
 
             drop_count += 1
@@ -287,12 +326,12 @@ def run(mac, debug=False):
                 # One reconnect attempt already failed — buds are genuinely gone.
                 _trigger_disconnected()
 
-            if sock is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-            time.sleep(RECONNECT_DELAY)
+            if drop_count >= 2:
+                # Dormant: BlueZ says the device isn't connected — no point
+                # hammering RFCOMM. Poll quietly until it reappears.
+                _wait_for_bt_connect(mac)
+            else:
+                time.sleep(RECONNECT_DELAY)
 
 
 if __name__ == "__main__":
