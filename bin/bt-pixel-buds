@@ -22,7 +22,8 @@ RFCOMM_CH       = 2
 RECONNECT_DELAY = 5
 NOTIFICATION_ID = "801"
 NOTIFICATION_TO = "3000"
-ANC_STATES = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
+ANC_STATES  = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
+_heal_lock  = threading.Lock()
 
 _RUNTIME_DIR    = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
@@ -73,15 +74,26 @@ def _connect(mac):
     s.settimeout(10)
     s.connect((mac, RFCOMM_CH))
 
-    # drain the initial device-info burst
+    # Process the initial device-info burst rather than discarding it —
+    # it contains battery and ANC state sent by the device on connect.
     s.settimeout(0.4)
     try:
         while True:
-            _read_msg(s)
+            g, c, p = _read_msg(s)
+            if g == 0x03 and c == 0x03 and len(p) == 3:
+                left_pct,  left_chg  = _decode_battery_byte(p[0])
+                right_pct, right_chg = _decode_battery_byte(p[1])
+                case_pct,  case_chg  = _decode_battery_byte(p[2])
+                _write_battery_state(left_pct, left_chg, right_pct, right_chg,
+                                     case_pct, case_chg)
+            elif g == 0x08 and c == 0x13 and len(p) >= 4:
+                state, supported = _decode_anc(p)
+                if state:
+                    _write_anc_state(state, supported)
     except (socket.timeout, ConnectionError):
         pass
 
-    # request current ANC state immediately so we're in sync
+    # Request current ANC state in case it wasn't in the burst.
     s.settimeout(10)
     s.send(bytes([0x08, 0x11, 0x00, 0x00]))
     s.settimeout(None)
@@ -115,77 +127,115 @@ def _write_battery_state(left, left_chg, right, right_chg, case, case_chg):
 # ── Widget triggers ───────────────────────────────────────────────────────────
 
 def _trigger_widget():
-    subprocess.run(["/usr/local/bin/pbwidget"], check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["/usr/local/bin/pbwidget"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _trigger_disconnected():
-    subprocess.run(["/usr/local/bin/pbwidget", "--disconnected"], check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["/usr/local/bin/pbwidget", "--disconnected"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # ── WirePlumber audio healing (runs in a background thread on connect) ────────
 
 def _heal_audio(mac):
-    mac_under = mac.replace(":", "_")
+    if not _heal_lock.acquire(blocking=False):
+        return
+    try:
+        mac_under = mac.replace(":", "_")
 
-    def _sinks():
-        r = subprocess.run(["pactl", "list", "sinks", "short"],
-                           capture_output=True, text=True)
-        return r.stdout
+        def _sinks():
+            return subprocess.run(["pactl", "list", "sinks", "short"],
+                                  capture_output=True, text=True).stdout
 
-    # Poll up to 7.5 s for WirePlumber to register the BT sink.
-    # Normally takes ~1 s; we give it 15 × 0.5 s before declaring failure.
-    for _ in range(15):
-        if f"bluez_output.{mac_under}" in _sinks():
-            break
-        time.sleep(0.5)
-    else:
-        # Sink never appeared — WirePlumber's A2DP transport negotiation failed.
-        # Notify the user and restart WirePlumber to recover.
-        subprocess.run(["dunstify", "-r", NOTIFICATION_ID, "--appname", "pbwidget",
-                        "-i", "bluetooth-active", "-t", NOTIFICATION_TO,
-                        "Audio routing failed", "Restarting WirePlumber…"],
-                       check=False)
-        subprocess.run(["systemctl", "--user", "restart", "wireplumber"], check=False)
-        time.sleep(2)
+        # Poll up to 7.5 s for WirePlumber to register the BT sink.
+        for _ in range(15):
+            if f"bluez_output.{mac_under}" in _sinks():
+                break
+            time.sleep(0.5)
+        else:
+            # Sink never appeared — WirePlumber's A2DP transport negotiation failed.
+            subprocess.run(["dunstify", "-r", NOTIFICATION_ID, "--appname", "pbwidget",
+                            "-i", "bluetooth-active", "-t", NOTIFICATION_TO,
+                            "Audio routing failed", "Restarting WirePlumber…"],
+                           check=False)
+            subprocess.run(["systemctl", "--user", "restart", "wireplumber"], check=False)
+            time.sleep(2)
 
-    # Whether we recovered or it worked first time: enforce A2DP (high quality)
-    # and make the BT sink the session default.
-    sinks_out = _sinks()
-    cards_out = subprocess.run(["pactl", "list", "cards", "short"],
-                               capture_output=True, text=True).stdout
+        sinks_out = _sinks()
+        cards_out = subprocess.run(["pactl", "list", "cards", "short"],
+                                   capture_output=True, text=True).stdout
 
-    sink = next((l.split()[1] for l in sinks_out.splitlines()
-                 if f"bluez_output.{mac_under}" in l), None)
-    card = next((l.split()[1] for l in cards_out.splitlines()
-                 if f"bluez_card.{mac_under}" in l), None)
+        sink = next((l.split()[1] for l in sinks_out.splitlines()
+                     if f"bluez_output.{mac_under}" in l), None)
+        card = next((l.split()[1] for l in cards_out.splitlines()
+                     if f"bluez_card.{mac_under}" in l), None)
 
-    if card:
-        subprocess.run(["pactl", "set-card-profile", card, "a2dp-sink"],
-                       check=False, capture_output=True)
-    if sink:
-        subprocess.run(["pactl", "set-default-sink", sink],
-                       check=False, capture_output=True)
+        if card:
+            # Only switch profile if not already A2DP — avoids tearing down a
+            # working transport and causing an audible glitch on every reconnect.
+            profile_out = subprocess.run(["pactl", "list", "cards"],
+                                         capture_output=True, text=True).stdout
+            in_card, current_profile = False, ""
+            for line in profile_out.splitlines():
+                if card in line:
+                    in_card = True
+                if in_card and "Active Profile:" in line:
+                    current_profile = line.split(":", 1)[1].strip()
+                    break
+            if current_profile != "a2dp-sink":
+                subprocess.run(["pactl", "set-card-profile", card, "a2dp-sink"],
+                               check=False, capture_output=True)
+
+        if sink:
+            default_sink = subprocess.run(["pactl", "get-default-sink"],
+                                          capture_output=True, text=True).stdout.strip()
+            if default_sink != sink:
+                subprocess.run(["pactl", "set-default-sink", sink],
+                               check=False, capture_output=True)
+    finally:
+        _heal_lock.release()
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run(mac, debug=False):
     os.makedirs(_RUNTIME_DIR, exist_ok=True)
-    last_state     = None
-    last_placement = None
-    was_connected  = False   # guards disconnect notification against startup failures
+    last_state         = None
+    last_placement     = None
+    last_charging      = None  # (left_chg, right_chg, case_chg)
+    drop_count         = 0     # consecutive failures; notification fires at 2
+    ever_connected     = False  # guards against spurious startup notifications
+    sock               = None
     print(f"bt-pixel-buds: monitoring {mac}{' [DEBUG]' if debug else ''}", flush=True)
 
     while True:
         try:
             print("bt-pixel-buds: connecting...", flush=True)
-            sock = _connect(mac)
-            was_connected = True
-            print("bt-pixel-buds: connected", flush=True)
+            # Clear stale state before connecting so the burst processing in
+            # _connect() writes fresh data into clean files.
+            for path in (BATTERY_STATE_FILE, ANC_STATE_FILE):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
-            # Fire the widget immediately, then heal audio in the background.
+            sock = _connect(mac)
+            ever_connected = True
+
+            # Reconnect succeeded — if there was a pending drop, it was transient.
+            if drop_count > 0:
+                drop_count = 0
+                print("bt-pixel-buds: reconnected", flush=True)
+            else:
+                print("bt-pixel-buds: connected", flush=True)
+
+            last_state     = None
+            last_placement = None
+            last_charging  = None
+
+            # Fire the widget immediately — _connect() already processed the
+            # initial burst so battery/ANC state files are populated.
             _trigger_widget()
             threading.Thread(target=_heal_audio, args=(mac,), daemon=True).start()
 
@@ -207,13 +257,15 @@ def run(mac, debug=False):
                         _trigger_widget()
 
                 elif g == 0x03 and c == 0x03 and len(p) == 3:
-                    case_pct,  case_chg  = _decode_battery_byte(p[0])
-                    left_pct,  left_chg  = _decode_battery_byte(p[1])
-                    right_pct, right_chg = _decode_battery_byte(p[2])
+                    left_pct,  left_chg  = _decode_battery_byte(p[0])
+                    right_pct, right_chg = _decode_battery_byte(p[1])
+                    case_pct,  case_chg  = _decode_battery_byte(p[2])
                     _write_battery_state(left_pct, left_chg, right_pct, right_chg,
                                          case_pct, case_chg)
 
                     placement = (left_pct == -1, right_pct == -1)
+                    charging  = (left_chg, right_chg, case_chg)
+
                     if placement != last_placement:
                         last_placement = placement
                         left_s  = "in case" if placement[0] else "out"
@@ -221,22 +273,25 @@ def run(mac, debug=False):
                         print(f"bt-pixel-buds: placement → left={left_s} right={right_s}",
                               flush=True)
                         _trigger_widget()
+                    elif charging != last_charging:
+                        print(f"bt-pixel-buds: charging → {charging}", flush=True)
+                        _trigger_widget()
+
+                    last_charging = charging
 
         except Exception as e:
             print(f"bt-pixel-buds: {e} — retrying in {RECONNECT_DELAY}s", flush=True)
 
-            # Only fire the disconnected notification if we had an active session,
-            # not on every failed reconnect attempt while the buds are off.
-            if was_connected:
+            drop_count += 1
+            if drop_count == 2 and ever_connected:
+                # One reconnect attempt already failed — buds are genuinely gone.
                 _trigger_disconnected()
-                was_connected  = False
-                last_state     = None
-                last_placement = None
 
-            try:
-                sock.close()
-            except Exception:
-                pass
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
             time.sleep(RECONNECT_DELAY)
 
 
