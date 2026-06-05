@@ -21,7 +21,7 @@ import time
 import dbus
 
 RFCOMM_CH       = 2
-RECONNECT_DELAY = 5
+RECONNECT_DELAY = 2
 NOTIFICATION_ID = "801"
 NOTIFICATION_TO = "3000"
 ANC_STATES  = {0x80: "transparency", 0x40: "adaptive", 0x20: "off", 0x08: "noise_cancellation"}
