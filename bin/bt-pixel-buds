@@ -2,15 +2,16 @@
 """Pixel Buds daemon.
 
 Keeps RFCOMM channel 2 open and:
-  - fires the battery/ANC widget on connect
+  - runs --on-update CMD on connect and on ANC/battery/placement changes
   - self-heals WirePlumber audio routing in the background
-  - updates the widget on ANC state or bud placement changes
-  - fires a disconnected notification when the connection drops
+  - runs --on-disconnect CMD when the connection drops
 Reconnects automatically with 5 s backoff.
 """
 
+import argparse
 import os
 import re
+import shlex
 import socket
 import struct
 import subprocess
@@ -145,16 +146,30 @@ def _write_battery_state(left, left_chg, right, right_chg, case, case_chg):
                 f"case={case}\ncase_charging={str(case_chg).lower()}\n")
 
 
-# ── Widget triggers ───────────────────────────────────────────────────────────
+# ── Event triggers ────────────────────────────────────────────────────────────
 
-def _trigger_widget():
-    subprocess.Popen(["/usr/local/bin/pbwidget"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def _trigger(cmd):
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _trigger_disconnected():
-    subprocess.Popen(["/usr/local/bin/pbwidget", "--disconnected"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def _parse_args():
+    p = argparse.ArgumentParser(description="Pixel Buds RFCOMM daemon")
+    p.add_argument("--on-update",
+                   default="/usr/local/bin/pbwidget",
+                   metavar="CMD",
+                   help="command run on battery/ANC/placement change (default: pbwidget)")
+    p.add_argument("--on-disconnect",
+                   default="/usr/local/bin/pbwidget --disconnected",
+                   metavar="CMD",
+                   help="command run on disconnect (default: pbwidget --disconnected)")
+    p.add_argument("--debug", action="store_true",
+                   help="print raw RFCOMM messages to stdout")
+    args = p.parse_args()
+    args.on_update     = shlex.split(args.on_update)
+    args.on_disconnect = shlex.split(args.on_disconnect)
+    return args
 
 
 # ── WirePlumber audio healing (runs in a background thread on connect) ────────
@@ -220,7 +235,7 @@ def _heal_audio(mac):
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
-def run(mac, debug=False):
+def run(mac, args):
     os.makedirs(_RUNTIME_DIR, exist_ok=True)
     last_state         = None
     last_placement     = None
@@ -228,7 +243,7 @@ def run(mac, debug=False):
     drop_count         = 0     # consecutive failures; notification fires at 2
     ever_connected     = False  # guards against spurious startup notifications
     sock               = None
-    print(f"bt-pixel-buds: monitoring {mac}{' [DEBUG]' if debug else ''}", flush=True)
+    print(f"bt-pixel-buds: monitoring {mac}{' [DEBUG]' if args.debug else ''}", flush=True)
 
     # Start dormant if the device isn't reachable yet — avoids two pointless
     # RFCOMM attempts before the dormant loop would kick in anyway.
@@ -260,15 +275,15 @@ def run(mac, debug=False):
             last_placement = None
             last_charging  = None
 
-            # Fire the widget immediately — _connect() already processed the
-            # initial burst so battery/ANC state files are populated.
-            _trigger_widget()
+            # Fire the on-update command immediately — _connect() already processed
+            # the initial burst so battery/ANC state files are populated.
+            _trigger(args.on_update)
             threading.Thread(target=_heal_audio, args=(mac,), daemon=True).start()
 
             while True:
                 g, c, p = _read_msg(sock)
 
-                if debug:
+                if args.debug:
                     print(f"  msg group=0x{g:02x} code=0x{c:02x} len={len(p)}"
                           f"  payload={p.hex()}", flush=True)
 
@@ -280,7 +295,7 @@ def run(mac, debug=False):
                         last_state = state
                         print(f"bt-pixel-buds: ANC → {state} (supported: {supported})",
                               flush=True)
-                        _trigger_widget()
+                        _trigger(args.on_update)
 
                 elif g == 0x03 and c == 0x03 and len(p) == 3:
                     left_pct,  left_chg  = _decode_battery_byte(p[0])
@@ -298,10 +313,10 @@ def run(mac, debug=False):
                         right_s = "in case" if placement[1] else "out"
                         print(f"bt-pixel-buds: placement → left={left_s} right={right_s}",
                               flush=True)
-                        _trigger_widget()
+                        _trigger(args.on_update)
                     elif charging != last_charging:
                         print(f"bt-pixel-buds: charging → {charging}", flush=True)
-                        _trigger_widget()
+                        _trigger(args.on_update)
 
                     last_charging = charging
 
@@ -325,7 +340,7 @@ def run(mac, debug=False):
             drop_count += 1
             if drop_count == 2 and ever_connected:
                 # One reconnect attempt already failed — buds are genuinely gone.
-                _trigger_disconnected()
+                _trigger(args.on_disconnect)
 
             if drop_count >= 2:
                 # Dormant: BlueZ says the device isn't connected — no point
@@ -336,4 +351,4 @@ def run(mac, debug=False):
 
 
 if __name__ == "__main__":
-    run(_load_mac(), debug="--debug" in sys.argv)
+    run(_load_mac(), _parse_args())

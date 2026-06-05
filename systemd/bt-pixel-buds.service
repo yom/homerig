@@ -4,6 +4,11 @@ After=graphical-session.target bluetooth.target
 Wants=bluetooth.target
 
 [Service]
+# To customise the trigger commands, override via:
+#   systemctl --user edit bt-pixel-buds
+# and add an [Service] block with your ExecStart, e.g.:
+#   ExecStart=
+#   ExecStart=/usr/local/bin/bt-pixel-buds --on-update "my-script" --on-disconnect "my-script --disconnected"
 ExecStart=/usr/local/bin/bt-pixel-buds
 Restart=always
 RestartSec=5
