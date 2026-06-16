@@ -21,14 +21,33 @@ if [[ -z "${VPN_GATEWAY:-}" || -z "${VPN_GROUP:-}" ]]; then
     exit 1
 fi
 
+# Debounce double-clicks: ignore a second invocation within 5 seconds.
+# Timestamp file (not flock) because the script exits immediately after
+# backgrounding gpclient — flock would release before the second click arrives.
+_LOCK=/tmp/vpn.lock
+_NOW=$(date +%s)
+if [ -f "$_LOCK" ] && [ $(( _NOW - $(cat "$_LOCK") )) -lt 2 ]; then
+    exit 0
+fi
+echo "$_NOW" > "$_LOCK"
+
 if /usr/bin/pgrep -x "gpclient" > /dev/null; then
-    timeout 10 sudo gpclient disconnect
-    ip link show tun0 &>/dev/null && sudo /usr/bin/ip route flush dev tun0 2>/dev/null || true
+    sudo gpclient disconnect
     _update_idesk_icon vpn-off.png
     dunstify -i "network-vpn-disconnected" "VPN disconnected 🔓"
 else
     sudo gpclient connect "$VPN_GATEWAY" -g "$VPN_GROUP" --reconnect-timeout 10 \
         --browser '/usr/local/bin/chrome-profile-wrapper' &
-    _update_idesk_icon vpn-on.png
-    dunstify -i "network-vpn" "VPN connected 🔒"
+    # Poll for the tun0 default route rather than using ip monitor, which does not
+    # flush output reliably in a non-TTY background context.
+    (
+        for _ in $(seq 90); do
+            if ip route show default 2>/dev/null | grep -q 'dev tun0'; then
+                _update_idesk_icon vpn-on.png
+                dunstify -i "network-vpn" "VPN connected 🔒"
+                exit 0
+            fi
+            sleep 1
+        done
+    ) &
 fi

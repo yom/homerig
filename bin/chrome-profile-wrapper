@@ -1,7 +1,6 @@
 #!/bin/bash
-# Invoked from a udev-triggered context (run as root), so we derive the desktop
-# user from SUDO_USER. --no-sandbox is required because udev provides no display
-# server sandbox.
+# Invoked by gpclient (running as root via sudo); derive the desktop user from SUDO_USER.
+# --no-sandbox is required because the sudo environment has no browser sandbox.
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME=$(eval echo "~$TARGET_USER")
 sudo -u "$TARGET_USER" DISPLAY="${DISPLAY:-:0}" XAUTHORITY="$TARGET_HOME/.Xauthority" \
