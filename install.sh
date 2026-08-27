@@ -23,6 +23,7 @@ info "Checking required packages..."
 #   xsecurelock  → screen locker (autostart, WMRootMenu)
 #   python3-pyqt5 → padlock.py
 #   python3-gi + python3-gi-cairo + gir1.2-gtk-3.0 → padlock-gtk.py
+#   python3-cairo + gir1.2-rsvg-2.0 + elementary-xfce-icon-theme → battery-gauge
 #   python3-pil  → saver-wallpaper
 #   python3-xlib → saver-wallpaper
 #   imagemagick  → idesk/make_icons.sh
@@ -41,8 +42,12 @@ APT_PACKAGES=(
     python3-gi
     python3-gi-cairo
     "gir1.2-gtk-3.0"
+    python3-cairo
+    "gir1.2-rsvg-2.0"
+    elementary-xfce-icon-theme
     python3-pil
     python3-xlib
+    python3-dbus
     imagemagick
     idesk
 )
@@ -171,6 +176,12 @@ for rule in "$REPO_DIR"/udev/*.rules; do
     echo "  sudo sed 's|DOTFILES_PATH|$REPO_DIR/bin|g' $rule > /etc/udev/rules.d/$rule_name" | sed "s|\$REPO_DIR|$REPO_DIR|g"
 done
 echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
+echo ""
+echo "  # Install systemd sleep hook (kills VPN before suspend, refreshes icon on wake):"
+echo "  sudo install -m 755 $REPO_DIR/bin/vpn-sleep-hook /etc/systemd/system-sleep/vpn"
+echo ""
+echo "  # Install NetworkManager dispatcher (syncs VPN icon and cleans up on network change):"
+echo "  sudo install -m 755 $REPO_DIR/bin/vpn-nm-dispatcher /etc/NetworkManager/dispatcher.d/99-vpn-cleanup"
 echo ""
 echo "  # Install and enable systemd user services:"
 echo "  mkdir -p ~/.config/systemd/user"
