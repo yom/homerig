@@ -173,7 +173,7 @@ echo ""
 echo "  # Install udev rules (paths are expanded from templates):"
 for rule in "$REPO_DIR"/udev/*.rules; do
     rule_name="$(basename "$rule")"
-    echo "  sudo sed 's|DOTFILES_PATH|$REPO_DIR/bin|g' $rule > /etc/udev/rules.d/$rule_name" | sed "s|\$REPO_DIR|$REPO_DIR|g"
+    echo "  sudo sed 's|DOTFILES_PATH|$REPO_DIR/bin|g' $rule | sudo tee /etc/udev/rules.d/$rule_name > /dev/null" | sed "s|\$REPO_DIR|$REPO_DIR|g"
 done
 echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
 echo ""
