@@ -1,0 +1,56 @@
+#!/bin/bash
+# NetworkManager dispatcher: syncs VPN icon and cleans up stale gpclient on network change.
+# Install: sudo install -m 755 vpn-nm-dispatcher /etc/NetworkManager/dispatcher.d/99-vpn-cleanup
+
+INTERFACE="$1"
+ACTION="$2"
+
+[[ "$ACTION" == "up" ]] || exit 0
+
+# Skip loopback and tunnel interfaces
+case "$INTERFACE" in
+    lo|tun*|vpn*) exit 0 ;;
+esac
+
+_detect_x_user() {
+    local x_user
+    x_user=$(ps -eo user,comm 2>/dev/null | grep -E '(Xorg|X)$' | head -1 | awk '{print $1}')
+    [[ -z "$x_user" || "$x_user" == "root" ]] && \
+        x_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | grep -v root | head -1)
+    [[ -z "$x_user" && -S /tmp/.X11-unix/X0 ]] && \
+        x_user=$(stat -c %U /tmp/.X11-unix/X0 2>/dev/null)
+    echo "$x_user"
+}
+
+_refresh_icon() {
+    local icon_name="$1" x_user="$2"
+    [[ -z "$x_user" || "$x_user" == "root" ]] && return
+    local user_home
+    user_home=$(getent passwd "$x_user" | cut -d: -f6) || return
+    ln -sf "${user_home}/.idesktop/${icon_name}" \
+           "${user_home}/.idesktop/vpn-current.png" 2>/dev/null || true
+    /usr/bin/pkill -x idesk 2>/dev/null || true
+    sleep 0.1
+    su - "$x_user" -c \
+        "DISPLAY=:0 XAUTHORITY=${user_home}/.Xauthority /usr/bin/idesk" \
+        2>/dev/null &
+}
+
+# Run asynchronously so NM isn't blocked while we wait for gpclient to settle
+(
+    sleep 5
+
+    X_USER=$(_detect_x_user)
+
+    if /usr/bin/pgrep -x gpclient > /dev/null; then
+        if ip route show default 2>/dev/null | grep -q 'dev tun0'; then
+            _refresh_icon vpn-on.png "$X_USER"
+        else
+            /usr/bin/pkill -f gpclient 2>/dev/null || true
+            ip route flush dev tun0 2>/dev/null || true
+            _refresh_icon vpn-off.png "$X_USER"
+        fi
+    else
+        _refresh_icon vpn-off.png "$X_USER"
+    fi
+) &

@@ -31,11 +31,15 @@ if [ -f "$_LOCK" ] && [ $(( _NOW - $(cat "$_LOCK") )) -lt 2 ]; then
 fi
 echo "$_NOW" > "$_LOCK"
 
-if /usr/bin/pgrep -x "gpclient" > /dev/null; then
-    sudo gpclient disconnect
-    _update_idesk_icon vpn-off.png
-    dunstify -i "network-vpn-disconnected" "VPN disconnected 🔓"
-else
+_vpn_state() {
+    if /usr/bin/pgrep -x gpclient > /dev/null; then
+        ip route show default 2>/dev/null | grep -q 'dev tun0' && echo "connected" || echo "stuck"
+    else
+        echo "disconnected"
+    fi
+}
+
+_connect() {
     sudo gpclient connect "$VPN_GATEWAY" -g "$VPN_GROUP" --reconnect-timeout 10 \
         --browser '/usr/local/bin/chrome-profile-wrapper' &
     # Poll for the tun0 default route rather than using ip monitor, which does not
@@ -50,4 +54,22 @@ else
             sleep 1
         done
     ) &
-fi
+}
+
+case "$(_vpn_state)" in
+    connected)
+        sudo gpclient disconnect
+        _update_idesk_icon vpn-off.png
+        dunstify -i "network-vpn-disconnected" "VPN disconnected 🔓"
+        ;;
+    stuck)
+        dunstify -i "network-vpn-disconnected" "VPN cleanup..." "Cleaning stale tunnel"
+        sudo pkill -x gpclient 2>/dev/null || true
+        sudo ip route flush dev tun0 2>/dev/null || true
+        sleep 1
+        _connect
+        ;;
+    disconnected)
+        _connect
+        ;;
+esac

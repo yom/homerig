@@ -1,0 +1,38 @@
+#!/bin/bash
+# Systemd sleep hook: kills gpclient before suspend and refreshes icon on wake.
+# Install: sudo install -m 755 vpn-sleep-hook /etc/systemd/system-sleep/vpn
+
+_detect_x_user() {
+    local x_user
+    x_user=$(ps -eo user,comm 2>/dev/null | grep -E '(Xorg|X)$' | head -1 | awk '{print $1}')
+    [[ -z "$x_user" || "$x_user" == "root" ]] && \
+        x_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | grep -v root | head -1)
+    [[ -z "$x_user" && -S /tmp/.X11-unix/X0 ]] && \
+        x_user=$(stat -c %U /tmp/.X11-unix/X0 2>/dev/null)
+    echo "$x_user"
+}
+
+_set_icon_off() {
+    local x_user="$1"
+    [[ -z "$x_user" || "$x_user" == "root" ]] && return
+    local user_home
+    user_home=$(getent passwd "$x_user" | cut -d: -f6) || return
+    ln -sf "${user_home}/.idesktop/vpn-off.png" \
+           "${user_home}/.idesktop/vpn-current.png" 2>/dev/null || true
+    /usr/bin/pkill -x idesk 2>/dev/null || true
+    sleep 0.1
+    su - "$x_user" -c \
+        "DISPLAY=:0 XAUTHORITY=${user_home}/.Xauthority /usr/bin/idesk" \
+        2>/dev/null &
+}
+
+case "$1" in
+    pre)
+        /usr/bin/pkill -f gpclient 2>/dev/null || true
+        ip route flush dev tun0 2>/dev/null || true
+        _set_icon_off "$(_detect_x_user)"
+        ;;
+    post)
+        _set_icon_off "$(_detect_x_user)"
+        ;;
+esac
