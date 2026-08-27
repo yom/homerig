@@ -10,10 +10,7 @@ readonly KBD_BACKLIGHT_DEVICE="${KBD_BACKLIGHT_DEVICE:-tpacpi::kbd_backlight}"
 readonly KBD_FLASH_DURATION="${KBD_FLASH_DURATION:-0.5}"
 readonly AC_STATE_FILE="/tmp/battery-ac-state-$(whoami)"
 
-readonly FULL_THRESHOLD="${FULL_THRESHOLD:-80}"
-readonly GOOD_THRESHOLD="${GOOD_THRESHOLD:-40}"
-readonly LOW_THRESHOLD="${LOW_THRESHOLD:-15}"
-readonly CAUTION_THRESHOLD="${CAUTION_THRESHOLD:-5}"
+readonly BATTERY_ICON_DIR="${BATTERY_ICON_DIR:-/usr/share/icons/Yaru/scalable/status}"
 
 VERBOSE=false
 X_USER=""
@@ -111,27 +108,27 @@ get_battery_info() {
 
 determine_battery_icon() {
     local state="$1" ac_online="$2" capacity="$3"
-    local base="/usr/share/icons/Paper/48x48/status/battery"
     local level suffix=""
 
-    if [[ $capacity -ge $FULL_THRESHOLD ]];      then level="full"
-    elif [[ $capacity -ge $GOOD_THRESHOLD ]];    then level="good"
-    elif [[ $capacity -ge $LOW_THRESHOLD ]];     then level="medium"
-    elif [[ $capacity -ge $CAUTION_THRESHOLD ]]; then level="low"
-    else                                              level="empty"
-    fi
+    # Round down to nearest 10, clamped to [0, 100]
+    level=$(( (capacity / 10) * 10 ))
+    [[ $level -gt 100 ]] && level=100
 
     case "x$state" in
         xCharging)
             suffix="-charging" ;;
         "xNot charging"|xFull)
-            [[ "$ac_online" == "1" ]] && level="full" ;;
+            [[ "$ac_online" == "1" ]] && suffix="-charged" ;;
         xDischarging|*)
-            [[ $capacity -ge $CAUTION_THRESHOLD && $capacity -lt $LOW_THRESHOLD ]] && level="caution" ;;
+            suffix="" ;;
     esac
 
-    log_debug "Icon: ${base}-${level}${suffix}.png"
-    echo "${base}-${level}${suffix}.png"
+    # battery-level-100-charged is the "plugged in, full" icon; skip -charged for lower levels
+    [[ "$suffix" == "-charged" && $level -lt 100 ]] && suffix=""
+
+    local icon="${BATTERY_ICON_DIR}/battery-level-${level}${suffix}-symbolic.svg"
+    log_debug "Icon: $icon"
+    echo "$icon"
 }
 
 show_battery_notification() {
@@ -141,6 +138,16 @@ show_battery_notification() {
         -h string:x-canonical-private-synchronous:battery \
         -t "$NOTIFICATION_TIMEOUT" \
         "$battery_info"
+}
+
+show_gauge_notification() {
+    local icon="$1"
+    local time_info
+    time_info=$(/usr/bin/acpi 2>/dev/null | awk -F', ' '{print $3}' | head -1)
+    run_as_x_user dunstify -r "$NOTIFICATION_ID" -i "$icon" \
+        -h string:x-canonical-private-synchronous:battery \
+        -t "$NOTIFICATION_TIMEOUT" \
+        "${time_info:-}"
 }
 
 main() {
@@ -168,9 +175,18 @@ main() {
     [[ "$prev_ac" == "0" && "$ac_status" == "1" ]] && flash_keyboard_backlight &
     echo "$ac_status" > "$AC_STATE_FILE" 2>/dev/null
 
-    local icon
-    icon=$(determine_battery_icon "$battery_status" "$ac_status" "$capacity")
-    show_battery_notification "$icon"
+    local icon=""
+    if command -v battery-gauge >/dev/null 2>&1; then
+        icon=$(run_as_x_user battery-gauge "$capacity" "$battery_status" "$ac_status" 2>/dev/null)
+    fi
+    if [[ -z "$icon" || ! -f "$icon" ]]; then
+        log_debug "battery-gauge unavailable or failed; falling back to Yaru icon"
+        icon=$(determine_battery_icon "$battery_status" "$ac_status" "$capacity")
+        show_battery_notification "$icon"
+    else
+        log_debug "Gauge PNG: $icon"
+        show_gauge_notification "$icon"
+    fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
