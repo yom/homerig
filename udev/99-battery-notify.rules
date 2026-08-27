@@ -4,8 +4,8 @@
 
 # AC adapter plugged/unplugged
 ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="AC", \
-    RUN+="/DOTFILES_PATH/battery"
+    RUN+="DOTFILES_PATH/battery"
 
 # Battery status changes (charging/discharging/full)
 ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="BAT*", \
-    RUN+="/DOTFILES_PATH/battery"
+    RUN+="DOTFILES_PATH/battery"
