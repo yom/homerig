@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+import dbus
+import dbus.mainloop.glib
+from gi.repository import GLib
+import subprocess
+
+FPRINT_IFACE = 'net.reactivated.Fprint.Device'
+NOTIF_SUMMARY = 'Fingerprint reader'
+NOTIF_ICON = '/usr/share/icons/elementary-xfce/devices/48/fingerprint.png'
+WAITING_TIMEOUT_MS = 60_000
+
+_notif_id = 0
+_cleanup_source = None
+
+
+def _close_notif():
+    global _notif_id
+    if _notif_id == 0:
+        return
+    try:
+        bus = dbus.SessionBus()
+        proxy = bus.get_object('org.freedesktop.Notifications',
+                               '/org/freedesktop/Notifications')
+        dbus.Interface(proxy, 'org.freedesktop.Notifications').CloseNotification(_notif_id)
+    except dbus.DBusException:
+        pass
+    _notif_id = 0
+
+
+def _cancel_cleanup():
+    global _cleanup_source
+    if _cleanup_source is not None:
+        GLib.source_remove(_cleanup_source)
+        _cleanup_source = None
+
+
+def _arm_cleanup():
+    global _cleanup_source
+    _cancel_cleanup()
+    _cleanup_source = GLib.timeout_add(WAITING_TIMEOUT_MS, _on_cleanup_timeout)
+
+
+def _on_cleanup_timeout():
+    global _cleanup_source
+    _cleanup_source = None
+    _close_notif()
+    return False
+
+
+def _notify(body, urgency='normal', timeout=5000):
+    global _notif_id
+    args = ['dunstify', '-p',
+            '-u', urgency,
+            '-t', str(timeout),
+            '-i', NOTIF_ICON]
+    if _notif_id:
+        args += ['-r', str(_notif_id)]
+    args += [NOTIF_SUMMARY, body]
+    try:
+        out = subprocess.check_output(args, text=True, timeout=5).strip()
+        if out.isdigit():
+            _notif_id = int(out)
+    except (subprocess.SubprocessError, ValueError):
+        pass
+
+
+def on_finger_selected(finger):
+    _cancel_cleanup()
+    finger_str = 'your finger' if finger in ('any', '') else finger.replace('-', ' ')
+    _notify(f'Place {finger_str} on the reader', urgency='normal',
+            timeout=WAITING_TIMEOUT_MS)
+    _arm_cleanup()
+
+
+def on_verify_status(result, done):
+    RETRY = {
+        'verify-retry-scan': 'Try again',
+        'verify-swipe-too-short': 'Swipe too short — try again',
+        'verify-finger-not-centered': 'Not centered — try again',
+        'verify-remove-and-retry': 'Remove finger and retry',
+    }
+    if not done:
+        if result in RETRY:
+            _notify(RETRY[result], urgency='normal', timeout=3000)
+            _arm_cleanup()
+        return
+
+    _cancel_cleanup()
+    if result == 'verify-match':
+        _notify('Fingerprint recognized', urgency='low', timeout=2000)
+    elif result == 'verify-no-match':
+        _notify('Fingerprint not recognized', urgency='critical', timeout=4000)
+    else:
+        msg = result.removeprefix('verify-').replace('-', ' ').capitalize()
+        _notify(msg, urgency='normal', timeout=3000)
+    global _notif_id
+    _notif_id = 0
+
+
+def main():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    bus.add_signal_receiver(on_finger_selected,
+                            signal_name='VerifyFingerSelected',
+                            dbus_interface=FPRINT_IFACE)
+    bus.add_signal_receiver(on_verify_status,
+                            signal_name='VerifyStatus',
+                            dbus_interface=FPRINT_IFACE)
+    GLib.MainLoop().run()
+
+
+if __name__ == '__main__':
+    main()
