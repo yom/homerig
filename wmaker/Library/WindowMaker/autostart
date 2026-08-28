@@ -6,6 +6,7 @@ xset b off # disable system beep
 xset s 300 5 # 5 min idle -> activate lock w/ 5s blank grace
 #compton -c -r 12 -l -15 -t -15 -G -b -I 0.028 -O 0.03 --backend glx --paint-on-overlay
 xss-lock --transfer-sleep-lock -- xsecurelock &
+xbindkeys &
 
 # Check the actual default route rather than just the gpclient process, since the
 # process can be running during auth (before the tunnel is up).
