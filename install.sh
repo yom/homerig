@@ -95,11 +95,15 @@ for src in \
 do
     rel="${src%%:*}"
     dst="${src##*:}"
-    if [[ -f "$dst" && "$FORCE" != "--force" ]]; then
-        warn "$dst already exists. Skipping. Use --force to overwrite."
+    if [[ -f "$dst" && ! -L "$dst" ]]; then
+        cp "$dst" "${dst}.bak"
+        warn "Backed up $dst to ${dst}.bak"
+    fi
+    if [[ -L "$dst" && "$FORCE" != "--force" ]]; then
+        warn "$dst is already a symlink. Skipping. Use --force to overwrite."
     else
-        cp "$REPO_DIR/$rel" "$dst"
-        done_ "Installed $dst"
+        ln -sf "$REPO_DIR/$rel" "$dst"
+        done_ "$dst → $REPO_DIR/$rel"
     fi
 done
 
