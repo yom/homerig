@@ -50,6 +50,8 @@ APT_PACKAGES=(
     python3-dbus
     imagemagick
     idesk
+    xdotool
+    powerline
 )
 
 MISSING=()
@@ -68,7 +70,7 @@ fi
 # ── Step 2: Shell config ────────────────────────────────────────────────────
 info "Setting up shell config..."
 
-for dotfile in .bashrc .xbindkeysrc; do
+for dotfile in .bashrc .xbindkeysrc .dircolors; do
     src="$REPO_DIR/shell/$dotfile"
     dst="$HOME/$dotfile"
     if [[ -f "$dst" && ! -L "$dst" ]]; then
@@ -107,7 +109,31 @@ do
     fi
 done
 
-# ── Step 4: Local config ────────────────────────────────────────────────────
+# ── Step 4: Powerline config ───────────────────────────────────────────────
+info "Setting up powerline config..."
+
+mkdir -p "$HOME/.config/powerline/colorschemes" "$HOME/.config/powerline/themes/shell"
+
+for src in \
+    "powerline/config.json:$HOME/.config/powerline/config.json" \
+    "powerline/colorschemes/default.json:$HOME/.config/powerline/colorschemes/default.json" \
+    "powerline/themes/shell/default_leftonly.json:$HOME/.config/powerline/themes/shell/default_leftonly.json"
+do
+    rel="${src%%:*}"
+    dst="${src##*:}"
+    if [[ -f "$dst" && ! -L "$dst" ]]; then
+        cp "$dst" "${dst}.bak"
+        warn "Backed up $dst to ${dst}.bak"
+    fi
+    if [[ -L "$dst" && "$FORCE" != "--force" ]]; then
+        warn "$dst is already a symlink. Skipping. Use --force to overwrite."
+    else
+        ln -sf "$REPO_DIR/$rel" "$dst"
+        done_ "$dst → $REPO_DIR/$rel"
+    fi
+done
+
+# ── Step 5: Local config ────────────────────────────────────────────────────
 info "Setting up local config..."
 
 mkdir -p "$HOME/.config/dotfiles"
@@ -120,7 +146,7 @@ else
     warn "→ Edit ~/.config/dotfiles/local.env and fill in VPN_GATEWAY, VPN_GROUP, DAC_VENDOR_ID, DAC_PRODUCT_ID, DAC_SINK_NAME, SYSTEM_SINK_NAME, and AUDIO_CARD."
 fi
 
-# ── Step 5: iDesk setup ─────────────────────────────────────────────────────
+# ── Step 6: iDesk setup ─────────────────────────────────────────────────────
 info "Setting up iDesk..."
 
 mkdir -p "$HOME/.idesktop"
@@ -153,7 +179,7 @@ else
     done_ "Installed $ideskrc_dst"
 fi
 
-# ── Step 6: Print sudo instructions ────────────────────────────────────────
+# ── Step 7: Print sudo instructions ────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════════"
 echo "  Manual steps required (run these yourself with sudo):"
