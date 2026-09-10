@@ -91,5 +91,8 @@
 # Take a windowed capture to clipboard
 "/usr/local/bin/screenshot -c"
     m:0x4 + c:107
+# Minimize all windows (show desktop)
+"wmctrl -l | awk '{print $1}' | xargs -I{} xdotool windowminimize {}"
+    m:0x40 + c:40
 #
 # End of xbindkeys configuration
