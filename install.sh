@@ -28,6 +28,9 @@ info "Checking required packages..."
 #   python3-xlib → saver-wallpaper
 #   imagemagick  → idesk/make_icons.sh
 #   idesk        → desktop icon manager
+#   feh          → wallpaper (autostart)
+#   fonts-inconsolata → Inconsolata font (xfce4-terminal)
+#   fonts-powerline   → Powerline symbols glyph supplement
 APT_PACKAGES=(
     dunst
     brightnessctl
@@ -52,6 +55,9 @@ APT_PACKAGES=(
     idesk
     xdotool
     powerline
+    feh
+    fonts-inconsolata
+    fonts-powerline
 )
 
 MISSING=()
@@ -70,7 +76,7 @@ fi
 # ── Step 2: Shell config ────────────────────────────────────────────────────
 info "Setting up shell config..."
 
-for dotfile in .bashrc .xbindkeysrc .dircolors; do
+for dotfile in .bashrc .xbindkeysrc .dircolors .Xresources; do
     src="$REPO_DIR/shell/$dotfile"
     dst="$HOME/$dotfile"
     if [[ -f "$dst" && ! -L "$dst" ]]; then
@@ -133,7 +139,39 @@ do
     fi
 done
 
-# ── Step 5: Local config ────────────────────────────────────────────────────
+# ── Step 5: xfce4-terminal config ──────────────────────────────────────────
+info "Setting up xfce4-terminal config..."
+
+mkdir -p "$HOME/.config/xfce4/terminal"
+dst="$HOME/.config/xfce4/terminal/terminalrc"
+if [[ -f "$dst" && ! -L "$dst" ]]; then
+    cp "$dst" "${dst}.bak"
+    warn "Backed up $dst to ${dst}.bak"
+fi
+if [[ -L "$dst" && "$FORCE" != "--force" ]]; then
+    warn "$dst is already a symlink. Skipping. Use --force to overwrite."
+else
+    ln -sf "$REPO_DIR/xfce4/terminal/terminalrc" "$dst"
+    done_ "$dst → $REPO_DIR/xfce4/terminal/terminalrc"
+fi
+
+# ── Step 6: Dunst config ────────────────────────────────────────────────────
+info "Setting up dunst config..."
+
+mkdir -p "$HOME/.config/dunst"
+dst="$HOME/.config/dunst/dunstrc"
+if [[ -f "$dst" && ! -L "$dst" ]]; then
+    cp "$dst" "${dst}.bak"
+    warn "Backed up $dst to ${dst}.bak"
+fi
+if [[ -L "$dst" && "$FORCE" != "--force" ]]; then
+    warn "$dst is already a symlink. Skipping. Use --force to overwrite."
+else
+    ln -sf "$REPO_DIR/dunst/dunstrc" "$dst"
+    done_ "$dst → $REPO_DIR/dunst/dunstrc"
+fi
+
+# ── Step 7: Local config ────────────────────────────────────────────────────
 info "Setting up local config..."
 
 mkdir -p "$HOME/.config/dotfiles"
@@ -146,7 +184,7 @@ else
     warn "→ Edit ~/.config/dotfiles/local.env and fill in VPN_GATEWAY, VPN_GROUP, DAC_VENDOR_ID, DAC_PRODUCT_ID, DAC_SINK_NAME, SYSTEM_SINK_NAME, and AUDIO_CARD."
 fi
 
-# ── Step 6: iDesk setup ─────────────────────────────────────────────────────
+# ── Step 8: iDesk setup ─────────────────────────────────────────────────────
 info "Setting up iDesk..."
 
 mkdir -p "$HOME/.idesktop"
@@ -179,7 +217,7 @@ else
     done_ "Installed $ideskrc_dst"
 fi
 
-# ── Step 7: Print sudo instructions ────────────────────────────────────────
+# ── Step 9: Print sudo instructions ────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════════"
 echo "  Manual steps required (run these yourself with sudo):"

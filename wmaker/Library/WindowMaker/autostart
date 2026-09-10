@@ -1,5 +1,6 @@
 #!/bin/sh
-feh --bg-fill "$HOME/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg"
+[ -f "$HOME/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg" ] && \
+    feh --bg-fill "$HOME/GNUstep/Library/WindowMaker/Backgrounds/lbc-HD.jpg"
 setxkbmap us -variant altgr-intl
 xset m 20/10 4
 xset b off # disable system beep
