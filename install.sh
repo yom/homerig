@@ -191,7 +191,7 @@ echo "  # Install and enable systemd user services:"
 echo "  mkdir -p ~/.config/systemd/user"
 for svc in "$REPO_DIR"/systemd/*.service; do
     svc_name="$(basename "$svc")"
-    echo "  cp $svc ~/.config/systemd/user/$svc_name"
+    echo "  systemctl --user link $svc"
     echo "  systemctl --user enable --now $svc_name"
 done
 echo ""
